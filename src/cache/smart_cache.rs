@@ -195,7 +195,7 @@ mod tests {
     use super::*;
     use tempfile::{NamedTempFile, TempDir};
     use std::io::Write;
-    use crate::types::{FileType, Complexity, ChangeLogEntry, ChangeType, ImpactLevel};
+    use crate::types::{FileType, Complexity, ChangeLogEntry, ChangeType, ImpactLevel, FileMetadata, CodeSummary};
 
     fn create_test_cache_entry(file_path: &str, file_hash: &str) -> CacheEntry {
         let metadata = FileMetadata {

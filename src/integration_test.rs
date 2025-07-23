@@ -8,7 +8,7 @@ use tempfile::TempDir;
 
 use crate::analyzers::{DiffAnalyzer, StateAnalyzer, RoutingAnalyzer, InterceptorAnalyzer};
 use crate::cache::CacheManager;
-use crate::utils::{GitUtils, PathNormalizer};
+use crate::utils::{GitUtils, path_normalizer::PathNormalizer};
 use crate::types::StateType;
 
 /// Integration test for changes command fixes

@@ -891,27 +891,38 @@ import { Utils } from './utils' // No semicolon comment"#;
 
     #[test]
     fn test_complexity_calculation() -> Result<()> {
-        let mut temp_file = NamedTempFile::new()?;
-        let complex_content = r#"
-        function complexFunction() {
-            if (condition1) {
-                for (let i = 0; i < 10; i++) {
-                    if (condition2) {
-                        while (condition3) {
-                            switch (value) {
-                                case 1:
-                                    break;
-                                case 2:
-                                    break;
-                                default:
-                                    break;
-                            }
+        let mut temp_file = NamedTempFile::with_suffix(".js")?;
+        let complex_content = r#"function complexFunction() {
+    if (condition1) {
+        for (let i = 0; i < 10; i++) {
+            if (condition2) {
+                while (condition3) {
+                    switch (value) {
+                        case 1: break;
+                        case 2: break;
+                        default: break;
+                    }
+                }
+            }
+        }
+    }
+}
+function anotherFunction() {
+    if (x) {
+        if (y) {
+            if (z) {
+                while (a) {
+                    for (b in items) {
+                        switch (c) {
+                            case 1: break;
+                            case 2: break;
                         }
                     }
                 }
             }
         }
-        "#;
+    }
+}"#;
         
         write!(temp_file, "{}", complex_content)?;
         

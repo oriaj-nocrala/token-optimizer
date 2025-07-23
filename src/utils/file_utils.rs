@@ -44,14 +44,16 @@ pub fn detect_file_type(path: &Path) -> FileType {
     
     match path.extension().and_then(|s| s.to_str()) {
         Some("rs") => {
-            // Rust file type detection based on path patterns
-            if path_str.contains("/bin/") {
+            // Rust file type detection based on path patterns (support both / and \ separators)
+            if path_str.contains("/bin/") || path_str.contains("\\bin\\") {
                 FileType::Other // Binary
-            } else if path_str.contains("/examples/") {
+            } else if path_str.contains("/examples/") || path_str.contains("\\examples\\") {
                 FileType::Other // Example
-            } else if path_str.contains("/tests/") {
+            } else if path_str.contains("/tests/") || path_str.contains("\\tests\\") || 
+                      path_str.starts_with("tests/") || path_str.starts_with("tests\\") {
                 FileType::Test
-            } else if path_str.contains("/benches/") {
+            } else if path_str.contains("/benches/") || path_str.contains("\\benches\\") ||
+                      path_str.starts_with("benches/") || path_str.starts_with("benches\\") {
                 FileType::Test // Benchmark
             } else {
                 // Default Rust file - will be refined by content analysis
@@ -91,7 +93,33 @@ pub fn detect_file_type_from_content(path: &Path, content: &str) -> FileType {
         return FileType::Cargo;
     }
     
-    // For TypeScript/JavaScript files, use existing logic
+    // For TypeScript/JavaScript files, analyze content for Angular patterns
+    if matches!(path.extension().and_then(|s| s.to_str()), Some("ts") | Some("js")) {
+        return refine_typescript_file_type(path, content, basic_type);
+    }
+    
+    basic_type
+}
+
+fn refine_typescript_file_type(path: &Path, content: &str, basic_type: FileType) -> FileType {
+    // Check for Angular patterns in content
+    if content.contains("@Component") {
+        return FileType::Component;
+    }
+    
+    if content.contains("@Injectable") {
+        return FileType::Service;
+    }
+    
+    if content.contains("@Pipe") || content.contains("implements PipeTransform") {
+        return FileType::Pipe;
+    }
+    
+    if content.contains("@NgModule") {
+        return FileType::Module;
+    }
+    
+    // If no specific Angular patterns found, return basic type
     basic_type
 }
 
@@ -131,17 +159,29 @@ fn refine_rust_file_type(path: &Path, content: &str, _basic_type: FileType) -> F
 
 /// Calculate complexity based on various metrics
 pub fn calculate_complexity(content: &str, line_count: usize) -> crate::types::Complexity {
-    let function_count = content.matches("fn ").count();
-    let struct_count = content.matches("struct ").count();
-    let enum_count = content.matches("enum ").count();
-    let trait_count = content.matches("trait ").count();
-    let impl_count = content.matches("impl ").count();
+    // Count language-agnostic complexity patterns
+    let mut total_complexity = 0;
     
-    let total_complexity = function_count + struct_count + enum_count + trait_count + impl_count;
+    // Rust-specific patterns
+    total_complexity += content.matches("fn ").count();
+    total_complexity += content.matches("struct ").count();
+    total_complexity += content.matches("enum ").count();
+    total_complexity += content.matches("trait ").count();
+    total_complexity += content.matches("impl ").count();
     
-    if total_complexity > 20 || line_count > 500 {
+    // TypeScript/JavaScript patterns
+    total_complexity += content.matches("function ").count();
+    total_complexity += content.matches("class ").count();
+    total_complexity += content.matches("interface ").count();
+    total_complexity += content.matches("async ").count();
+    
+    // Control flow complexity (cyclomatic complexity approximation)
+    let cyclomatic = calculate_cyclomatic_complexity(content);
+    let complexity_score = total_complexity as f64 + cyclomatic / 5.0;
+    
+    if complexity_score > 15.0 || line_count > 500 {
         crate::types::Complexity::High
-    } else if total_complexity > 10 || line_count > 200 {
+    } else if complexity_score >= 3.0 || line_count > 200 {
         crate::types::Complexity::Medium
     } else {
         crate::types::Complexity::Low
