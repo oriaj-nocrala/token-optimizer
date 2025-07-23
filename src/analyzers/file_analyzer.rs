@@ -4,6 +4,7 @@ use chrono::Utc;
 use crate::types::{FileMetadata, FileType, DetailedAnalysis, LocationInfo};
 use crate::utils::file_utils::*;
 use crate::analyzers::ts_ast_analyzer::TypeScriptASTAnalyzer;
+use crate::analyzers::rust_analyzer::RustAnalyzer;
 
 pub struct FileAnalyzer;
 
@@ -42,6 +43,10 @@ impl FileAnalyzer {
         match file_type {
             FileType::Component | FileType::Service | FileType::Pipe | FileType::Other if self.is_typescript_file(content) => {
                 self.analyze_typescript_content(content)
+            }
+            FileType::RustLibrary | FileType::RustBinary | FileType::RustModule | 
+            FileType::RustTest | FileType::RustBench | FileType::RustExample => {
+                self.analyze_rust_content(content, Path::new("dummy"))
             }
             _ => Ok(None)
         }
@@ -171,6 +176,33 @@ impl FileAnalyzer {
             FileType::Test => {
                 let test_cases = content.matches("it(").count() + content.matches("test(").count();
                 format!("Test file with {} test cases", test_cases)
+            }
+            FileType::RustLibrary => {
+                let lines = content.lines().count();
+                format!("Rust library with {} lines", lines)
+            }
+            FileType::RustBinary => {
+                let lines = content.lines().count();
+                format!("Rust binary with {} lines", lines)
+            }
+            FileType::RustModule => {
+                let lines = content.lines().count();
+                format!("Rust module with {} lines", lines)
+            }
+            FileType::RustTest => {
+                let test_cases = content.matches("#[test]").count();
+                format!("Rust test file with {} test cases", test_cases)
+            }
+            FileType::RustBench => {
+                let bench_cases = content.matches("#[bench]").count();
+                format!("Rust benchmark file with {} benchmark cases", bench_cases)
+            }
+            FileType::RustExample => {
+                let lines = content.lines().count();
+                format!("Rust example with {} lines", lines)
+            }
+            FileType::Cargo => {
+                format!("Cargo configuration file")
             }
             FileType::Other => {
                 let lines = content.lines().count();
@@ -334,6 +366,90 @@ impl FileAnalyzer {
             }
         }
         None
+    }
+    
+    /// Analyze Rust content using the RustAnalyzer
+    fn analyze_rust_content(&self, content: &str, path: &Path) -> Result<Option<DetailedAnalysis>> {
+        // Handle Cargo.toml files separately
+        if path.file_name().and_then(|n| n.to_str()) == Some("Cargo.toml") {
+            return self.analyze_cargo_toml_content(content);
+        }
+        
+        let mut rust_analyzer = RustAnalyzer::new()?;
+        let metadata = rust_analyzer.analyze_file(path, content)?;
+        Ok(metadata.detailed_analysis)
+    }
+    
+    /// Analyze Cargo.toml content specifically
+    fn analyze_cargo_toml_content(&self, content: &str) -> Result<Option<DetailedAnalysis>> {
+        use crate::analyzers::rust_analyzer::CargoAnalyzer;
+        
+        match CargoAnalyzer::analyze_cargo_toml(content) {
+            Ok(cargo_info) => {
+                // Create a DetailedAnalysis with Cargo-specific information
+                let mut analysis = DetailedAnalysis {
+                    functions: Vec::new(),
+                    classes: Vec::new(),
+                    interfaces: Vec::new(),
+                    enums: Vec::new(),
+                    types: Vec::new(),
+                    variables: Vec::new(),
+                    component_info: None,
+                    service_info: None,
+                    pipe_info: None,
+                    module_info: None,
+                };
+                
+                // Convert cargo dependencies to "functions" for display purposes
+                // This is a temporary solution to show cargo info in the existing structure
+                for dep in &cargo_info.dependencies {
+                    let modifiers = match &dep.source {
+                        crate::types::CargoDependencySource::Git { .. } => vec!["git".to_string()],
+                        crate::types::CargoDependencySource::Path { .. } => vec!["path".to_string()],
+                        crate::types::CargoDependencySource::CratesIo => Vec::new(),
+                    };
+                    
+                    analysis.functions.push(crate::types::FunctionInfo {
+                        name: format!("dep:{}", dep.name),
+                        parameters: Vec::new(),
+                        return_type: dep.version.clone().unwrap_or_else(|| "latest".to_string()),
+                        is_async: dep.optional,
+                        modifiers,
+                        location: crate::types::LocationInfo { line: 1, column: 1 },
+                        description: Some(format!("Dependency: {}", dep.name)),
+                    });
+                }
+                
+                // Add dev dependencies
+                for dep in &cargo_info.dev_dependencies {
+                    analysis.functions.push(crate::types::FunctionInfo {
+                        name: format!("dev-dep:{}", dep.name),
+                        parameters: Vec::new(),
+                        return_type: dep.version.clone().unwrap_or_else(|| "latest".to_string()),
+                        is_async: false,
+                        modifiers: vec!["dev".to_string()],
+                        location: crate::types::LocationInfo { line: 1, column: 1 },
+                        description: Some(format!("Dev dependency: {}", dep.name)),
+                    });
+                }
+                
+                // Add build dependencies
+                for dep in &cargo_info.build_dependencies {
+                    analysis.functions.push(crate::types::FunctionInfo {
+                        name: format!("build-dep:{}", dep.name),
+                        parameters: Vec::new(),
+                        return_type: dep.version.clone().unwrap_or_else(|| "latest".to_string()),
+                        is_async: false,
+                        modifiers: vec!["build".to_string()],
+                        location: crate::types::LocationInfo { line: 1, column: 1 },
+                        description: Some(format!("Build dependency: {}", dep.name)),
+                    });
+                }
+                
+                Ok(Some(analysis))
+            }
+            Err(_) => Ok(None), // Return None if cargo analysis fails
+        }
     }
 }
 

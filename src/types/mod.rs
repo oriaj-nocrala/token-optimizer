@@ -33,6 +33,7 @@ pub struct DetailedAnalysis {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum FileType {
+    // TypeScript/JavaScript types
     Component,
     Service,
     Style,
@@ -40,6 +41,16 @@ pub enum FileType {
     Test,
     Pipe,
     Module,
+    
+    // Rust-specific types
+    RustLibrary,    // lib.rs
+    RustBinary,     // main.rs or bin/
+    RustModule,     // mod.rs or regular .rs modules
+    RustTest,       // test files and #[cfg(test)] modules
+    RustBench,      // benchmark files
+    RustExample,    // examples/
+    Cargo,          // Cargo.toml/Cargo.lock
+    
     Other,
 }
 
@@ -613,6 +624,211 @@ pub struct PerformanceMetrics {
     pub load_time: f64,
     pub bundle_size: u64,
     pub memory_usage: u64,
+}
+
+// Rust-specific types and structures
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RustModuleInfo {
+    pub name: String,
+    pub is_public: bool,
+    pub submodules: Vec<String>,
+    pub structs: Vec<RustStructInfo>,
+    pub enums: Vec<RustEnumInfo>,
+    pub traits: Vec<RustTraitInfo>,
+    pub impl_blocks: Vec<RustImplInfo>,
+    pub functions: Vec<FunctionInfo>,
+    pub constants: Vec<RustConstInfo>,
+    pub type_aliases: Vec<RustTypeAliasInfo>,
+    pub macros: Vec<RustMacroInfo>,
+    pub use_statements: Vec<RustUseInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RustStructInfo {
+    pub name: String,
+    pub is_public: bool,
+    pub is_tuple_struct: bool,
+    pub is_unit_struct: bool,
+    pub fields: Vec<RustFieldInfo>,
+    pub derives: Vec<String>,
+    pub attributes: Vec<String>,
+    pub generics: Vec<String>,
+    pub location: LocationInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RustFieldInfo {
+    pub name: String,
+    pub field_type: String,
+    pub is_public: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RustEnumInfo {
+    pub name: String,
+    pub is_public: bool,
+    pub variants: Vec<RustEnumVariant>,
+    pub derives: Vec<String>,
+    pub attributes: Vec<String>,
+    pub generics: Vec<String>,
+    pub location: LocationInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RustEnumVariant {
+    pub name: String,
+    pub variant_type: RustEnumVariantType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum RustEnumVariantType {
+    Unit,                           // Variant
+    Tuple(Vec<String>),            // Variant(Type1, Type2)
+    Struct(Vec<RustFieldInfo>),    // Variant { field: Type }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RustTraitInfo {
+    pub name: String,
+    pub is_public: bool,
+    pub is_unsafe: bool,
+    pub supertraits: Vec<String>,
+    pub associated_types: Vec<RustAssociatedType>,
+    pub methods: Vec<RustTraitMethod>,
+    pub generics: Vec<String>,
+    pub location: LocationInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RustAssociatedType {
+    pub name: String,
+    pub bounds: Vec<String>,
+    pub default: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RustTraitMethod {
+    pub name: String,
+    pub is_required: bool,
+    pub is_async: bool,
+    pub is_unsafe: bool,
+    pub signature: String,
+    pub has_default_impl: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RustImplInfo {
+    pub target_type: String,
+    pub trait_name: Option<String>, // None for inherent impl
+    pub is_unsafe: bool,
+    pub methods: Vec<FunctionInfo>,
+    pub associated_types: Vec<RustAssociatedType>,
+    pub generics: Vec<String>,
+    pub where_clause: Option<String>,
+    pub location: LocationInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RustConstInfo {
+    pub name: String,
+    pub is_public: bool,
+    pub const_type: String,
+    pub value: Option<String>,
+    pub location: LocationInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RustTypeAliasInfo {
+    pub name: String,
+    pub is_public: bool,
+    pub target_type: String,
+    pub generics: Vec<String>,
+    pub location: LocationInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RustMacroInfo {
+    pub name: String,
+    pub is_public: bool,
+    pub macro_type: RustMacroType,
+    pub location: LocationInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum RustMacroType {
+    DeclarativeMacro,  // macro_rules!
+    ProcMacro,         // proc_macro
+    DeriveMacro,       // proc_macro_derive
+    AttributeMacro,    // proc_macro_attribute
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RustUseInfo {
+    pub path: String,
+    pub alias: Option<String>,
+    pub is_public: bool, // pub use
+    pub items: Vec<String>, // for use foo::{bar, baz}
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CargoInfo {
+    pub package_name: String,
+    pub version: String,
+    pub edition: String,
+    pub dependencies: Vec<CargoDependency>,
+    pub dev_dependencies: Vec<CargoDependency>,
+    pub build_dependencies: Vec<CargoDependency>,
+    pub features: Vec<CargoFeature>,
+    pub targets: Vec<CargoTarget>,
+    pub workspace: Option<CargoWorkspace>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CargoDependency {
+    pub name: String,
+    pub version: Option<String>,
+    pub source: CargoDependencySource,
+    pub features: Vec<String>,
+    pub optional: bool,
+    pub default_features: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum CargoDependencySource {
+    CratesIo,
+    Git { url: String, branch: Option<String>, tag: Option<String>, rev: Option<String> },
+    Path { path: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CargoFeature {
+    pub name: String,
+    pub dependencies: Vec<String>,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CargoTarget {
+    pub name: String,
+    pub target_type: CargoTargetType,
+    pub path: String,
+    pub required_features: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum CargoTargetType {
+    Binary,
+    Library,
+    Example,
+    Test,
+    Benchmark,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CargoWorkspace {
+    pub members: Vec<String>,
+    pub exclude: Vec<String>,
+    pub default_members: Vec<String>,
 }
 
 #[cfg(test)]

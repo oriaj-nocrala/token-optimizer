@@ -51,7 +51,14 @@ impl RoutingAnalyzer {
             
             if path.is_file() {
                 let path_str = path.to_string_lossy();
-                if path_str.contains("routes") && path_str.ends_with(".ts") {
+                
+                // Exclude node_modules and test files
+                if path_str.contains("node_modules") || path_str.contains(".spec.") {
+                    continue;
+                }
+                
+                // Only look in src directory for routes
+                if path_str.contains("routes") && path_str.ends_with(".ts") && path_str.contains("/src/") {
                     route_files.push(path_str.to_string());
                 }
             }
@@ -69,7 +76,14 @@ impl RoutingAnalyzer {
             
             if path.is_file() {
                 let path_str = path.to_string_lossy();
-                if path_str.contains("guard") && path_str.ends_with(".ts") && !path_str.contains(".spec.") {
+                
+                // Exclude node_modules and test files
+                if path_str.contains("node_modules") || path_str.contains(".spec.") {
+                    continue;
+                }
+                
+                // Only look in src directory for guards
+                if path_str.contains("guard") && path_str.ends_with(".ts") && path_str.contains("/src/") {
                     guard_files.push(path_str.to_string());
                 }
             }

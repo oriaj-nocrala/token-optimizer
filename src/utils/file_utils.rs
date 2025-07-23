@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::path::Path;
 use std::fs;
 use walkdir::WalkDir;
-use crate::types::{FileType, Complexity};
+use crate::types::FileType;
 
 pub fn read_file_content(path: &Path) -> Result<String> {
     match fs::read_to_string(path) {
@@ -26,13 +26,38 @@ pub fn count_lines(content: &str) -> usize {
 
 pub fn detect_file_type(path: &Path) -> FileType {
     let path_str = path.to_string_lossy();
+    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     
-    // Check for test files first
-    if path_str.contains(".spec.") || path_str.contains(".test.") {
+    // Check for test files first (both TypeScript and Rust patterns)
+    if path_str.contains(".spec.") || path_str.contains(".test.") || 
+       (path_str.contains("test") && path_str.ends_with(".rs")) {
         return FileType::Test;
     }
     
+    // Special Rust files
+    match file_name {
+        "Cargo.toml" | "Cargo.lock" => return FileType::Config,
+        "lib.rs" | "main.rs" => return FileType::Other, // Will be refined by content analysis
+        "mod.rs" => return FileType::Other,
+        _ => {}
+    }
+    
     match path.extension().and_then(|s| s.to_str()) {
+        Some("rs") => {
+            // Rust file type detection based on path patterns
+            if path_str.contains("/bin/") {
+                FileType::Other // Binary
+            } else if path_str.contains("/examples/") {
+                FileType::Other // Example
+            } else if path_str.contains("/tests/") {
+                FileType::Test
+            } else if path_str.contains("/benches/") {
+                FileType::Test // Benchmark
+            } else {
+                // Default Rust file - will be refined by content analysis
+                FileType::Other
+            }
+        }
         Some("ts") => {
             if path_str.contains("component") {
                 FileType::Component
@@ -45,6 +70,8 @@ pub fn detect_file_type(path: &Path) -> FileType {
         }
         Some("scss") | Some("css") => FileType::Style,
         Some("json") => FileType::Config,
+        Some("toml") => FileType::Config,
+        Some("md") => FileType::Other, // Documentation
         _ => FileType::Other,
     }
 }
@@ -52,74 +79,72 @@ pub fn detect_file_type(path: &Path) -> FileType {
 // New function to detect file type from content for better accuracy
 pub fn detect_file_type_from_content(path: &Path, content: &str) -> FileType {
     // First check file name patterns
-    let path_based_type = detect_file_type(path);
+    let basic_type = detect_file_type(path);
     
-    // If we already have a specific type from path, return it
-    if !matches!(path_based_type, FileType::Other) {
-        return path_based_type;
+    // For Rust files, we can refine the type based on content
+    if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+        return refine_rust_file_type(path, content, basic_type);
     }
     
-    // For TypeScript files that weren't classified by path, check content
-    if path.extension().and_then(|s| s.to_str()) == Some("ts") {
-        // Check for Angular component patterns
-        if content.contains("@Component") {
-            return FileType::Component;
-        }
-        
-        // Check for Angular service patterns
-        if content.contains("@Injectable") {
-            return FileType::Service;
-        }
-        
-        // Check for Angular pipe patterns
-        if content.contains("@Pipe") {
-            return FileType::Pipe;
-        }
-        
-        // Check for Angular module patterns
-        if content.contains("@NgModule") {
-            return FileType::Module;
-        }
-        
-        // Check for class patterns that might be components
-        if content.contains("export class") && content.contains("Component") {
-            return FileType::Component;
-        }
-        
-        // Check for class patterns that might be services
-        if content.contains("export class") && content.contains("Service") {
-            return FileType::Service;
-        }
-        
-        // Check for class patterns that might be pipes
-        if content.contains("export class") && content.contains("Pipe") {
-            return FileType::Pipe;
-        }
-        
-        // Check for class patterns that might be modules
-        if content.contains("export class") && content.contains("Module") {
-            return FileType::Module;
-        }
-        
-        // Check for transform method (common in pipes)
-        if content.contains("transform(") && content.contains("PipeTransform") {
-            return FileType::Pipe;
-        }
+    // For Cargo.toml files
+    if path.file_name().and_then(|n| n.to_str()) == Some("Cargo.toml") {
+        return FileType::Cargo;
     }
     
-    path_based_type
+    // For TypeScript/JavaScript files, use existing logic
+    basic_type
 }
 
-pub fn calculate_complexity(content: &str, line_count: usize) -> Complexity {
-    let cyclomatic_complexity = calculate_cyclomatic_complexity(content);
-    let size_factor = line_count as f64 / 100.0;
+fn refine_rust_file_type(path: &Path, content: &str, basic_type: FileType) -> FileType {
+    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     
-    let total_complexity = cyclomatic_complexity + size_factor;
+    // Special file names have priority
+    match file_name {
+        "lib.rs" => return FileType::RustLibrary,
+        "main.rs" => return FileType::RustBinary,
+        "mod.rs" => return FileType::RustModule,
+        _ => {}
+    }
     
-    match total_complexity {
-        x if x < 5.0 => Complexity::Low,
-        x if x < 15.0 => Complexity::Medium,
-        _ => Complexity::High,
+    // Check content patterns for test detection
+    if content.contains("#[cfg(test)]") || 
+       content.contains("#[test]") ||
+       content.contains("mod tests") {
+        return FileType::RustTest;
+    }
+    
+    // Check for benchmark patterns
+    if content.contains("#[bench]") ||
+       content.contains("test::Bencher") ||
+       path.to_string_lossy().contains("benches") {
+        return FileType::RustBench;
+    }
+    
+    // Check for binary patterns
+    if content.contains("fn main()") {
+        return FileType::RustBinary;
+    }
+    
+    // Default to module for other .rs files
+    FileType::RustModule
+}
+
+/// Calculate complexity based on various metrics
+pub fn calculate_complexity(content: &str, line_count: usize) -> crate::types::Complexity {
+    let function_count = content.matches("fn ").count();
+    let struct_count = content.matches("struct ").count();
+    let enum_count = content.matches("enum ").count();
+    let trait_count = content.matches("trait ").count();
+    let impl_count = content.matches("impl ").count();
+    
+    let total_complexity = function_count + struct_count + enum_count + trait_count + impl_count;
+    
+    if total_complexity > 20 || line_count > 500 {
+        crate::types::Complexity::High
+    } else if total_complexity > 10 || line_count > 200 {
+        crate::types::Complexity::Medium
+    } else {
+        crate::types::Complexity::Low
     }
 }
 
@@ -179,6 +204,7 @@ mod tests {
     use std::fs;
     use tempfile::{NamedTempFile, TempDir};
     use std::io::Write;
+    use crate::types::Complexity;
 
     #[test]
     fn test_count_lines() {
@@ -478,5 +504,263 @@ mod tests {
         assert!(!content.is_empty()); // Should contain replacement characters
         
         Ok(())
+    }
+    
+    // Tests specific to Rust file type detection
+    #[test]
+    fn test_rust_file_type_detection() {
+        // Test special Rust files
+        assert_eq!(detect_file_type(Path::new("lib.rs")), FileType::Other);
+        assert_eq!(detect_file_type(Path::new("main.rs")), FileType::Other);
+        assert_eq!(detect_file_type(Path::new("mod.rs")), FileType::Other);
+        assert_eq!(detect_file_type(Path::new("Cargo.toml")), FileType::Config);
+        assert_eq!(detect_file_type(Path::new("Cargo.lock")), FileType::Config);
+        
+        // Test path-based detection
+        assert_eq!(detect_file_type(Path::new("src/bin/tool.rs")), FileType::Other);
+        assert_eq!(detect_file_type(Path::new("examples/demo.rs")), FileType::Other);
+        assert_eq!(detect_file_type(Path::new("tests/integration.rs")), FileType::Test);
+        assert_eq!(detect_file_type(Path::new("benches/benchmark.rs")), FileType::Test);
+        
+        // Test pattern-based detection
+        assert_eq!(detect_file_type(Path::new("lib.test.rs")), FileType::Test);
+        assert_eq!(detect_file_type(Path::new("module.spec.rs")), FileType::Test);
+    }
+    
+    #[test]
+    fn test_refine_rust_file_type() {
+        // Test lib.rs detection
+        let lib_content = r#"
+//! Library documentation
+pub mod utils;
+pub use utils::*;
+        "#;
+        assert_eq!(detect_file_type_from_content(Path::new("lib.rs"), lib_content), FileType::RustLibrary);
+        
+        // Test main.rs detection
+        let main_content = r#"
+fn main() {
+    println!("Hello, world!");
+}
+        "#;
+        assert_eq!(detect_file_type_from_content(Path::new("main.rs"), main_content), FileType::RustBinary);
+        
+        // Test module detection
+        let mod_content = r#"
+pub struct MyStruct;
+pub fn my_function() {}
+        "#;
+        assert_eq!(detect_file_type_from_content(Path::new("mod.rs"), mod_content), FileType::RustModule);
+        
+        // Test test file detection by content
+        let test_content = r#"
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_something() {
+        assert_eq!(2 + 2, 4);
+    }
+}
+        "#;
+        assert_eq!(detect_file_type_from_content(Path::new("utils.rs"), test_content), FileType::RustTest);
+        
+        // Test benchmark detection
+        let bench_content = r#"
+use test::Bencher;
+
+#[bench]
+fn bench_function(b: &mut Bencher) {
+    b.iter(|| {
+        // benchmark code
+    });
+}
+        "#;
+        assert_eq!(detect_file_type_from_content(Path::new("bench.rs"), bench_content), FileType::RustBench);
+        
+        // Test binary detection by main function
+        let binary_content = r#"
+use std::env;
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    println!("Args: {:?}", args);
+}
+        "#;
+        assert_eq!(detect_file_type_from_content(Path::new("tool.rs"), binary_content), FileType::RustBinary);
+        
+        // Test Cargo.toml detection
+        let cargo_content = r#"
+[package]
+name = "test-project"
+version = "0.1.0"
+edition = "2021"
+        "#;
+        assert_eq!(detect_file_type_from_content(Path::new("Cargo.toml"), cargo_content), FileType::Cargo);
+        
+        // Test default module case
+        let module_content = r#"
+pub struct Config {
+    pub debug: bool,
+}
+
+impl Config {
+    pub fn new() -> Self {
+        Self { debug: false }
+    }
+}
+        "#;
+        assert_eq!(detect_file_type_from_content(Path::new("config.rs"), module_content), FileType::RustModule);
+    }
+    
+    #[test]
+    fn test_rust_complexity_calculation() {
+        // Test Rust-specific complexity patterns
+        let simple_rust = r#"
+pub fn hello() -> &'static str {
+    "Hello, world!"
+}
+        "#;
+        assert_eq!(calculate_complexity(simple_rust, 4), Complexity::Low);
+        
+        let medium_rust = r#"
+pub struct User {
+    name: String,
+    age: u32,
+}
+
+impl User {
+    pub fn new(name: String, age: u32) -> Self {
+        Self { name, age }
+    }
+    
+    pub fn is_adult(&self) -> bool {
+        self.age >= 18
+    }
+}
+
+pub enum Status {
+    Active,
+    Inactive,
+}
+
+pub trait Displayable {
+    fn display(&self) -> String;
+}
+
+impl Displayable for User {
+    fn display(&self) -> String {
+        format!("{} ({})", self.name, self.age)
+    }
+}
+        "#;
+        let complexity = calculate_complexity(medium_rust, medium_rust.lines().count());
+        assert!(matches!(complexity, Complexity::Medium | Complexity::High));
+        
+        // Test high complexity with many functions, structs, enums, traits, and impls
+        let complex_rust = format!("{}\n{}\n{}\n{}\n{}", 
+            "fn func() {}\n".repeat(15),  // 15 functions
+            "struct S {}\n".repeat(8),     // 8 structs
+            "enum E {}\n".repeat(5),       // 5 enums
+            "trait T {}\n".repeat(3),      // 3 traits
+            "impl S {}\n".repeat(4)        // 4 impl blocks
+        );
+        assert_eq!(calculate_complexity(&complex_rust, 600), Complexity::High);
+    }
+    
+    #[test]
+    fn test_rust_file_patterns() {
+        // Test various Rust file naming patterns
+        assert_eq!(detect_file_type(Path::new("src/lib.rs")), FileType::Other);
+        assert_eq!(detect_file_type(Path::new("src/main.rs")), FileType::Other);
+        assert_eq!(detect_file_type(Path::new("src/utils/mod.rs")), FileType::Other);
+        assert_eq!(detect_file_type(Path::new("src/models/user.rs")), FileType::Other);
+        
+        // Windows paths
+        assert_eq!(detect_file_type(Path::new("src\\bin\\tool.rs")), FileType::Other);
+        assert_eq!(detect_file_type(Path::new("examples\\demo.rs")), FileType::Other);
+        assert_eq!(detect_file_type(Path::new("tests\\integration.rs")), FileType::Test);
+        assert_eq!(detect_file_type(Path::new("benches\\benchmark.rs")), FileType::Test);
+        
+        // Test files with test patterns
+        assert_eq!(detect_file_type(Path::new("src/lib.test.rs")), FileType::Test);
+        assert_eq!(detect_file_type(Path::new("tests/unit_test.rs")), FileType::Test);
+        assert_eq!(detect_file_type(Path::new("test_utils.rs")), FileType::Test);
+    }
+    
+    #[test]
+    fn test_is_ignored_file_rust() {
+        // Test Rust-specific ignored files/directories
+        assert!(is_ignored_file(Path::new("target/debug/main")));
+        assert!(is_ignored_file(Path::new("target/release/app.exe")));
+        assert!(is_ignored_file(Path::new("target/doc/index.html")));
+        
+        // Test that source files are not ignored
+        assert!(!is_ignored_file(Path::new("src/main.rs")));
+        assert!(!is_ignored_file(Path::new("src/lib.rs")));
+        assert!(!is_ignored_file(Path::new("Cargo.toml")));
+        assert!(!is_ignored_file(Path::new("Cargo.lock")));
+    }
+    
+    #[test]
+    fn test_walk_project_files_rust() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let temp_path = temp_dir.path();
+        
+        // Create Rust project structure
+        fs::create_dir_all(temp_path.join("src"))?;
+        fs::create_dir_all(temp_path.join("tests"))?;
+        fs::create_dir_all(temp_path.join("examples"))?;
+        fs::create_dir_all(temp_path.join("benches"))?;
+        
+        // Create Rust files
+        fs::write(temp_path.join("Cargo.toml"), "# Cargo.toml")?;
+        fs::write(temp_path.join("src/lib.rs"), "// lib.rs")?;
+        fs::write(temp_path.join("src/main.rs"), "// main.rs")?;
+        fs::write(temp_path.join("src/utils.rs"), "// utils.rs")?;
+        fs::write(temp_path.join("tests/integration.rs"), "// integration test")?;
+        fs::write(temp_path.join("examples/demo.rs"), "// demo example")?;
+        fs::write(temp_path.join("benches/benchmark.rs"), "// benchmark")?;
+        
+        // Create ignored files
+        fs::create_dir_all(temp_path.join("target/debug"))?;
+        fs::write(temp_path.join("target/debug/app"), "binary")?;
+        
+        // Update walk_project_files to include Rust files
+        let files = walk_project_files_extended(temp_path)?;
+        
+        // Should include Rust files
+        assert!(files.iter().any(|f| f.ends_with("Cargo.toml")));
+        assert!(files.iter().any(|f| f.ends_with("src/lib.rs")));
+        assert!(files.iter().any(|f| f.ends_with("src/main.rs")));
+        assert!(files.iter().any(|f| f.ends_with("src/utils.rs")));
+        
+        // Should exclude target directory
+        assert!(!files.iter().any(|f| f.contains("target")));
+        
+        Ok(())
+    }
+    
+    // Helper function for testing Rust file walking
+    fn walk_project_files_extended(root: &Path) -> Result<Vec<String>> {
+        let mut files = Vec::new();
+        
+        for entry in WalkDir::new(root)
+            .follow_links(true)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if path.is_file() && !is_ignored_file(path) {
+                if let Some(extension) = path.extension() {
+                    if matches!(extension.to_str(), 
+                        Some("ts") | Some("js") | Some("scss") | Some("css") | 
+                        Some("json") | Some("rs") | Some("toml")) {
+                        files.push(path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+        
+        Ok(files)
     }
 }

@@ -20,10 +20,15 @@ impl GitUtils {
             let path = entry.path().unwrap_or("");
             let status = entry.status();
             
-            if status.contains(Status::WT_MODIFIED) || 
-               status.contains(Status::INDEX_MODIFIED) ||
-               status.contains(Status::WT_NEW) ||
-               status.contains(Status::INDEX_NEW) {
+            // Only include files that have actual content changes (exclude added/deleted empty files)
+            if status.contains(Status::WT_MODIFIED) {
+                // Check if the file actually has content changes
+                if let Ok((added, removed)) = self.get_file_changes(path) {
+                    if added > 0 || removed > 0 {
+                        files.push(path.to_string());
+                    }
+                }
+            } else if status.contains(Status::INDEX_MODIFIED) {
                 files.push(path.to_string());
             }
         }
@@ -32,9 +37,33 @@ impl GitUtils {
     }
 
     pub fn get_file_changes(&self, file_path: &str) -> Result<(usize, usize)> {
-        // This is a simplified version - in a real implementation you'd analyze the diff
-        // Returns (lines_added, lines_removed)
-        Ok((0, 0))
+        use git2::DiffOptions;
+        
+        let head = self.repo.head()?.peel_to_tree()?;
+        let mut opts = DiffOptions::new();
+        opts.pathspec(file_path);
+        
+        // Compare working directory to HEAD
+        let diff = self.repo.diff_tree_to_workdir(Some(&head), Some(&mut opts))?;
+        
+        let mut lines_added = 0;
+        let mut lines_removed = 0;
+        
+        diff.foreach(
+            &mut |_delta, _progress| true,
+            None,
+            Some(&mut |_delta, _hunk| true),
+            Some(&mut |_delta, _hunk, line| {
+                match line.origin() {
+                    '+' => lines_added += 1,
+                    '-' => lines_removed += 1,
+                    _ => {}
+                }
+                true
+            }),
+        )?;
+        
+        Ok((lines_added, lines_removed))
     }
 
     pub fn get_branch_name(&self) -> Result<String> {

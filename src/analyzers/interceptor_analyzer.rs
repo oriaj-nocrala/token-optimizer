@@ -43,7 +43,14 @@ impl InterceptorAnalyzer {
             
             if path.is_file() {
                 let path_str = path.to_string_lossy();
-                if path_str.contains("interceptor") && path_str.ends_with(".ts") && !path_str.contains(".spec.") {
+                
+                // Exclude node_modules and test files
+                if path_str.contains("node_modules") || path_str.contains(".spec.") {
+                    continue;
+                }
+                
+                // Only look in src directory for interceptors
+                if path_str.contains("interceptor") && path_str.ends_with(".ts") && path_str.contains("/src/") {
                     interceptor_files.push(path_str.to_string());
                 }
             }

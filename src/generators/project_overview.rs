@@ -3,7 +3,6 @@ use std::path::Path;
 use chrono::Utc;
 use crate::types::*;
 use crate::cache::CacheManager;
-use crate::utils::{walk_project_files, is_ignored_file};
 use crate::analyzers::{RoutingAnalyzer, InterceptorAnalyzer, StateAnalyzer};
 use std::collections::HashMap;
 
@@ -207,7 +206,7 @@ impl ProjectOverviewGenerator {
         let mut mixins = Vec::new();
         let mut components = Vec::new();
         
-        for (file_path, entry) in &self.cache_manager.get_cache().entries {
+        for (_file_path, entry) in &self.cache_manager.get_cache().entries {
             if matches!(entry.metadata.file_type, FileType::Style) {
                 // Extract SCSS variables and mixins from file metadata summary
                 // This is a simplified implementation
@@ -407,7 +406,7 @@ impl ProjectOverviewGenerator {
         Ok(vec![])
     }
 
-    fn catalog_assets(&self, project_path: &Path) -> Result<AssetSummary> {
+    fn catalog_assets(&self, _project_path: &Path) -> Result<AssetSummary> {
         // Simplified implementation
         Ok(AssetSummary {
             images: vec!["logo.png".to_string(), "banner.jpg".to_string()],
@@ -416,7 +415,7 @@ impl ProjectOverviewGenerator {
         })
     }
 
-    fn get_recent_changes(&self, project_path: &Path) -> Result<ChangeAnalysis> {
+    fn get_recent_changes(&self, _project_path: &Path) -> Result<ChangeAnalysis> {
         // Simplified implementation
         Ok(ChangeAnalysis {
             session_id: "session-123".to_string(),
@@ -431,7 +430,7 @@ impl ProjectOverviewGenerator {
         })
     }
 
-    fn identify_active_features(&self, project_path: &Path) -> Result<Vec<String>> {
+    fn identify_active_features(&self, _project_path: &Path) -> Result<Vec<String>> {
         // Simplified implementation
         Ok(vec![
             "User Authentication".to_string(),
@@ -489,7 +488,7 @@ impl ProjectOverviewGenerator {
         })
     }
 
-    fn calculate_health_metrics(&self, project_path: &Path) -> Result<HealthMetrics> {
+    fn calculate_health_metrics(&self, _project_path: &Path) -> Result<HealthMetrics> {
         let stats = self.cache_manager.get_cache_stats();
         
         // Calculate average complexity from cached files

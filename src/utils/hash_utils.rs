@@ -28,7 +28,6 @@ pub fn verify_file_hash(path: &Path, expected_hash: &str) -> Result<bool> {
 mod tests {
     use super::*;
     use std::fs;
-    use std::path::PathBuf;
     use tempfile::NamedTempFile;
 
     #[test]

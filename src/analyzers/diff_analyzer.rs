@@ -14,7 +14,7 @@ impl DiffAnalyzer {
         Ok(DiffAnalyzer { git_utils })
     }
 
-    pub fn analyze_changes(&self, project_path: &Path) -> Result<ChangeAnalysis> {
+    pub fn analyze_changes(&self, _project_path: &Path) -> Result<ChangeAnalysis> {
         let session_id = format!("session-{}", Utc::now().timestamp());
         let timestamp = Utc::now();
         
@@ -93,7 +93,7 @@ impl DiffAnalyzer {
         }
     }
 
-    fn identify_changed_sections(&self, file_path: &str) -> Result<Vec<String>> {
+    fn identify_changed_sections(&self, _file_path: &str) -> Result<Vec<String>> {
         // Simplified implementation - would need actual diff parsing
         Ok(vec![
             "imports".to_string(),
@@ -101,7 +101,7 @@ impl DiffAnalyzer {
         ])
     }
 
-    fn find_impacted_files(&self, file_path: &str) -> Result<Vec<String>> {
+    fn find_impacted_files(&self, _file_path: &str) -> Result<Vec<String>> {
         // Simplified implementation - would need dependency graph analysis
         Ok(vec![])
     }

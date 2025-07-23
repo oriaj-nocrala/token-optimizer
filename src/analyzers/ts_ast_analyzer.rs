@@ -1,6 +1,5 @@
 use anyhow::Result;
-use tree_sitter::{Parser, Node, Query, QueryCursor, Tree};
-use std::collections::HashMap;
+use tree_sitter::{Parser, Node, Tree};
 use crate::types::{FunctionInfo, ClassInfo, ComponentInfo, ServiceInfo, PipeInfo, ParameterInfo, PropertyInfo, LocationInfo};
 
 #[derive(Debug, Clone)]

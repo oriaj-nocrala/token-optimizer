@@ -20,7 +20,7 @@ impl StateAnalyzer {
         };
 
         // Analyze all services in the cache for state management patterns
-        for (cached_path, entry) in &cache_manager.get_cache().entries {
+        for (_cached_path, entry) in &cache_manager.get_cache().entries {
             if matches!(entry.metadata.file_type, crate::types::FileType::Service) {
                 // Use the actual file path from the cache entry metadata
                 let actual_path = &entry.metadata.path;
@@ -106,7 +106,10 @@ impl StateAnalyzer {
             return self.extract_property_info(line, StateType::BehaviorSubject);
         }
         
-        if line.contains("Subject") && !line.contains("BehaviorSubject") {
+        if line.contains("Subject") && 
+           !line.contains("BehaviorSubject") && 
+           !line.contains("ReplaySubject") && 
+           !line.contains("AsyncSubject") {
             return self.extract_property_info(line, StateType::Subject);
         }
         
@@ -327,7 +330,10 @@ impl StateAnalyzer {
             return (ObservableType::BehaviorSubject, None);
         }
         
-        if line.contains("new Subject(") && !line.contains("BehaviorSubject") {
+        if line.contains("new Subject(") && 
+           !line.contains("BehaviorSubject") && 
+           !line.contains("ReplaySubject") && 
+           !line.contains("AsyncSubject") {
             return (ObservableType::Subject, None);
         }
         
@@ -468,7 +474,7 @@ impl StateAnalyzer {
     fn detect_patterns(&self, services: &[StateSummary]) -> Vec<String> {
         let mut patterns = Vec::new();
         
-        let total_services = services.len();
+        let _total_services = services.len();
         let services_with_behavior_subjects = services.iter()
             .filter(|s| s.state_properties.iter().any(|p| matches!(p.property_type, StateType::BehaviorSubject)))
             .count();
