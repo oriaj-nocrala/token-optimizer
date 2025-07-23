@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub mod downloader;
-pub use downloader::{ModelDownloader, ModelInfo};
+pub use downloader::ModelDownloader;
 
 /// Smart context analysis result
 #[derive(Debug, Clone, Serialize, Deserialize)]

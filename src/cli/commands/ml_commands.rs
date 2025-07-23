@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::ml::{MLConfig, MLService, PluginManager};
-use crate::ml::models::{ModelDownloader, ModelInfo};
+use crate::ml::models::ModelDownloader;
 
 /// Run ML context analysis
 pub async fn run_ml_context(

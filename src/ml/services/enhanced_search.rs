@@ -4,7 +4,7 @@
 
 use crate::ml::{
     MLConfig,
-    plugins::{QwenEmbeddingPlugin, QwenRerankerPlugin, PluginManager},
+    plugins::{QwenEmbeddingPlugin, QwenRerankerPlugin},
     vector_db::{
         VectorDatabase, VectorStoreFactory, VectorDBConfig, VectorEntry,
         SemanticSearchPipeline, SemanticSearchFactory, SearchQuery, 
@@ -15,7 +15,7 @@ use anyhow::Result;
 use parking_lot::RwLock;
 use std::path::Path;
 use std::sync::Arc;
-use tracing::{info, debug, warn};
+use tracing::{info, warn};
 
 /// Enhanced search service combining all ML components
 pub struct EnhancedSearchService {

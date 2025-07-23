@@ -260,7 +260,7 @@ impl ImpactAnalysisService {
     }
 
     /// Calculate confidence for enhanced analysis
-    fn calculate_enhanced_confidence(&self, base_impact: &BaseImpactAnalysis, semantic_impact: &SemanticImpactAnalysis, risk_assessment: &ChangeRiskAssessment) -> f32 {
+    fn calculate_enhanced_confidence(&self, _base_impact: &BaseImpactAnalysis, semantic_impact: &SemanticImpactAnalysis, risk_assessment: &ChangeRiskAssessment) -> f32 {
         let base_confidence = 0.7; // AST analysis baseline
         let semantic_boost = (semantic_impact.semantic_relationships.len() as f32 * 0.05).min(0.2);
         let risk_certainty = match risk_assessment.overall_risk {
@@ -321,7 +321,7 @@ impl ImpactAnalysisService {
     }
 
     /// Helper methods for analysis
-    fn determine_change_type(&self, function_info: &crate::types::FunctionInfo, content: &str) -> ChangeType {
+    fn determine_change_type(&self, _function_info: &crate::types::FunctionInfo, content: &str) -> ChangeType {
         if content.contains("@Injectable") || content.contains("service") {
             ChangeType::ServiceModification
         } else if content.contains("@Component") || content.contains("component") {
@@ -359,7 +359,7 @@ impl ImpactAnalysisService {
         }
     }
 
-    fn find_static_dependencies(&self, function_name: &str, content: &str) -> Vec<String> {
+    fn find_static_dependencies(&self, _function_name: &str, content: &str) -> Vec<String> {
         let mut dependencies = Vec::new();
         
         // Simple pattern matching for imports

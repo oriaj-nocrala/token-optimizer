@@ -8,7 +8,8 @@ use std::fs;
 use tempfile::TempDir;
 
 use crate::ml::{
-    MLConfig, PluginManager, LayeredAnalysisService, AnalysisLevel, 
+    MLConfig, PluginManager,
+    layered_analysis::{LayeredAnalysisService, AnalysisLevel},
     StructuredPrompts, MLResponseCache, ExternalTimeoutWrapper
 };
 

@@ -17,4 +17,3 @@ pub use ts_ast_analyzer::*;
 pub use routing_analyzer::*;
 pub use interceptor_analyzer::*;
 pub use state_analyzer::*;
-pub use rust_analyzer::*;

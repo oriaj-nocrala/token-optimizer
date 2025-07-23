@@ -18,7 +18,6 @@ pub use impact_analysis::ImpactAnalysisService;
 pub use pattern::PatternDetectionService;
 pub use search::SemanticSearchService;
 pub use optimization::TokenOptimizationService;
-pub use enhanced_search::{EnhancedSearchService, SearchRequest, SearchType, SearchFilters, SearchOptions, SearchResponse, CodeIndexEntry};
 
 /// Main ML service coordinator
 pub struct MLService {

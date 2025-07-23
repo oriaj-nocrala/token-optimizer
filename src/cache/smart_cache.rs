@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::fs;
 use chrono::{DateTime, Utc};
-use crate::types::{CacheEntry, CodeSummary, FileMetadata};
+use crate::types::CacheEntry;
 use crate::utils::hash_utils::calculate_file_hash;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

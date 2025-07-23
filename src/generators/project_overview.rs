@@ -204,7 +204,7 @@ impl ProjectOverviewGenerator {
     fn analyze_styles(&self, _project_path: &Path) -> Result<StyleSummary> {
         let mut variables = Vec::new();
         let mut mixins = Vec::new();
-        let mut components = Vec::new();
+        let components = Vec::new();
         
         for (_file_path, entry) in &self.cache_manager.get_cache().entries {
             if matches!(entry.metadata.file_type, FileType::Style) {

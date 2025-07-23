@@ -95,7 +95,7 @@ pub fn detect_file_type_from_content(path: &Path, content: &str) -> FileType {
     basic_type
 }
 
-fn refine_rust_file_type(path: &Path, content: &str, basic_type: FileType) -> FileType {
+fn refine_rust_file_type(path: &Path, content: &str, _basic_type: FileType) -> FileType {
     let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     
     // Special file names have priority

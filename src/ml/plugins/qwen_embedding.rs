@@ -296,7 +296,7 @@ impl QwenEmbeddingPlugin {
         if model_available {
             // Real model is loaded, perform actual tensor operations
             let (_input_tensor, _device) = {
-                let model_guard = self.gguf_model.read();
+                let _model_guard = self.gguf_model.read();
                 let device_guard = self.device.read();
                 
                 let device = device_guard.as_ref().unwrap().clone();
@@ -364,7 +364,7 @@ impl QwenEmbeddingPlugin {
         
         // Generate embedding using content analysis and semantic understanding
         let text_bytes = text.as_bytes();
-        let text_len = text_bytes.len() as f32;
+        let _text_len = text_bytes.len() as f32;
         
         // Create embeddings based on multiple factors
         for (i, val) in embedding.iter_mut().enumerate() {

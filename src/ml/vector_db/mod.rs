@@ -9,9 +9,7 @@ pub mod persistence;
 pub mod semantic_search;
 
 pub use vector_store::*;
-pub use lsh_index::*;
 pub use similarity::*;
-pub use persistence::*;
 pub use semantic_search::*;
 
 use anyhow::Result;
