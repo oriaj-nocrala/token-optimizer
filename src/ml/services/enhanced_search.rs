@@ -4,7 +4,7 @@
 
 use crate::ml::{
     MLConfig,
-    plugins::{QwenEmbeddingPlugin, QwenRerankerPlugin},
+    plugins::{QwenEmbeddingPlugin, QwenRerankerPlugin, MLPlugin},
     vector_db::{
         VectorDatabase, VectorStoreFactory, VectorDBConfig, VectorEntry,
         SemanticSearchPipeline, SemanticSearchFactory, SearchQuery, 
@@ -101,6 +101,7 @@ impl EnhancedSearchService {
         let vector_db_config = VectorDBConfig {
             cache_dir: format!("{}/.cache/vector-db", 
                               std::env::current_dir()?.to_string_lossy()),
+            similarity_threshold: 0.1, // Lower threshold for better recall with dummy embeddings
             ..VectorDBConfig::default()
         };
         let vector_db = VectorStoreFactory::create_native(vector_db_config);
@@ -108,6 +109,27 @@ impl EnhancedSearchService {
         // Initialize plugins
         let embedding_plugin = Arc::new(RwLock::new(QwenEmbeddingPlugin::new()));
         let reranker_plugin = Arc::new(RwLock::new(QwenRerankerPlugin::new()));
+        
+        // Load the plugins
+        println!("🔧 Loading ML plugins from: {}", config.model_cache_dir.display());
+        
+        println!("📥 Loading Qwen Embedding plugin...");
+        match embedding_plugin.write().load(&config).await {
+            Ok(_) => println!("✅ Qwen Embedding plugin loaded successfully"),
+            Err(e) => {
+                println!("⚠️  Failed to load Qwen Embedding plugin: {}", e);
+                println!("   Semantic search will use fallback mode");
+            }
+        }
+        
+        println!("📥 Loading Qwen Reranker plugin...");
+        match reranker_plugin.write().load(&config).await {
+            Ok(_) => println!("✅ Qwen Reranker plugin loaded successfully"),
+            Err(e) => {
+                println!("⚠️  Failed to load Qwen Reranker plugin: {}", e);
+                println!("   Reranking will use fallback mode");
+            }
+        }
         
         // Create semantic search pipeline
         let search_config = SemanticSearchConfig {
@@ -136,13 +158,25 @@ impl EnhancedSearchService {
     /// Perform enhanced search
     pub async fn search(&self, request: SearchRequest) -> Result<SearchResponse> {
         let start_time = std::time::Instant::now();
-        info!("Performing enhanced search: {:?}", request.search_type);
+        println!("🔍 Performing enhanced search: {:?}", request.search_type);
+        println!("🔍 Query: '{}'", request.query);
+        
+        // Check vector DB stats before search
+        let vector_db = self.vector_db.read();
+        let stats = vector_db.stats();
+        println!("📊 Vector DB stats before search:");
+        println!("   Total vectors: {}", stats.total_vectors);
+        println!("   Total files: {}", stats.total_files);
+        drop(vector_db); // Release the read lock
         
         // Convert request to internal query
         let query = self.build_search_query(&request)?;
+        println!("🔍 Built internal query: {:?}", query);
         
         // Perform search
+        println!("🔍 Executing search pipeline...");
         let results = self.search_pipeline.search(&query).await?;
+        println!("🔍 Search pipeline returned {} results", results.len());
         
         // Apply additional filtering
         let filtered_results = self.apply_filters(results, &request.filters).await?;
@@ -168,27 +202,38 @@ impl EnhancedSearchService {
     
     /// Add code to the search index
     pub async fn index_code(&self, code_entries: Vec<CodeIndexEntry>) -> Result<usize> {
-        info!("Indexing {} code entries", code_entries.len());
+        println!("📝 Indexing {} code entries", code_entries.len());
         
         let mut indexed_count = 0;
         let mut vector_db = self.vector_db.write();
         
-        for entry in code_entries {
+        for (i, entry) in code_entries.into_iter().enumerate() {
+            println!("📝 Processing entry {}: {}", i + 1, entry.file_path);
             match self.create_vector_entry(entry).await {
                 Ok(vector_entry) => {
+                    println!("✅ Created vector entry with ID: {}", vector_entry.id);
                     vector_db.add_vector(vector_entry)?;
                     indexed_count += 1;
+                    println!("✅ Added to vector DB, total indexed: {}", indexed_count);
                 }
                 Err(e) => {
-                    warn!("Failed to index code entry: {}", e);
+                    println!("❌ Failed to create vector entry: {}", e);
                 }
             }
         }
         
         // Save to disk
+        println!("💾 Saving vector database to disk...");
         vector_db.save()?;
         
-        info!("Successfully indexed {} entries", indexed_count);
+        // Check database stats
+        let stats = vector_db.stats();
+        println!("📊 Vector DB stats after indexing:");
+        println!("   Total vectors: {}", stats.total_vectors);
+        println!("   Total files: {}", stats.total_files);
+        println!("   Index size: {:.2}MB", stats.index_size_mb);
+        
+        println!("✅ Successfully indexed {} entries", indexed_count);
         Ok(indexed_count)
     }
     
@@ -379,8 +424,8 @@ impl EnhancedSearchService {
     
     /// Create vector entry from code index entry
     async fn create_vector_entry(&self, code_entry: CodeIndexEntry) -> Result<VectorEntry> {
-        // For now, create a dummy embedding - in production this would use the ML pipeline
-        let embedding = self.create_dummy_embedding(&code_entry.content);
+        // Use real embedding model to generate embedding
+        let embedding = self.generate_real_embedding(&code_entry.content).await?;
         
         // Create metadata
         let metadata = CodeMetadata {
@@ -442,8 +487,26 @@ impl EnhancedSearchService {
         format!("{:x}", hasher.finalize())
     }
     
-    /// Create dummy embedding for testing
-    fn create_dummy_embedding(&self, content: &str) -> Vec<f32> {
+    /// Generate real embedding using Qwen model
+    async fn generate_real_embedding(&self, content: &str) -> Result<Vec<f32>> {
+        // Use the semantic search pipeline's embedding generation method
+        println!("🤖 Generating real embedding for content: {} chars", content.len());
+        
+        match self.search_pipeline.generate_query_embedding(content).await {
+            Ok(embedding) => {
+                println!("✅ Generated real embedding with {} dimensions", embedding.len());
+                Ok(embedding)
+            }
+            Err(e) => {
+                println!("⚠️  Failed to generate real embedding: {}", e);
+                println!("   Falling back to dummy embedding");
+                Ok(self.create_dummy_embedding_fallback(content))
+            }
+        }
+    }
+    
+    /// Fallback dummy embedding for testing (only used if real model fails)
+    fn create_dummy_embedding_fallback(&self, content: &str) -> Vec<f32> {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
         

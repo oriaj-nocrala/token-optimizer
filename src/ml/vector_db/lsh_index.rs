@@ -87,17 +87,23 @@ impl LSHIndex {
                          self.dimension, vector.len());
         }
         
+        println!("🔍 LSH add called for ID: {}, vector len: {}", id, vector.len());
+        
         // Compute all hash values first to avoid borrowing issues
         let hash_values: Vec<u64> = (0..self.hash_tables.len())
             .map(|table_idx| self.compute_hash(vector, table_idx))
             .collect();
         
+        println!("🔍 LSH computed hashes for '{}': {:?}", id, hash_values);
+        
         // Add to each hash table
         for (table_idx, hash_table) in self.hash_tables.iter_mut().enumerate() {
             let hash_value = hash_values[table_idx];
-            hash_table.entry(hash_value)
-                .or_insert_with(Vec::new)
-                .push(id.clone());
+            let bucket = hash_table.entry(hash_value)
+                .or_insert_with(Vec::new);
+            bucket.push(id.clone());
+            println!("🔍 LSH added '{}' to table {} bucket {} (now has {} items)", 
+                     id, table_idx, hash_value, bucket.len());
         }
         
         Ok(())
@@ -110,19 +116,34 @@ impl LSHIndex {
                          self.dimension, query.len());
         }
         
+        println!("🔍 LSH search_candidates called with query len: {}", query.len());
+        println!("🔍 LSH index has {} tables", self.hash_tables.len());
+        
         let mut candidates = std::collections::HashSet::new();
         
         // Search in each hash table
         for (table_idx, hash_table) in self.hash_tables.iter().enumerate() {
             let hash_value = self.compute_hash(query, table_idx);
+            println!("🔍 Table {}: computed hash = {}, table has {} buckets", 
+                     table_idx, hash_value, hash_table.len());
             
             if let Some(ids) = hash_table.get(&hash_value) {
+                println!("🔍 Table {}: found bucket with {} IDs", table_idx, ids.len());
                 for id in ids {
                     candidates.insert(id.clone());
+                }
+            } else {
+                println!("🔍 Table {}: no bucket found for hash {}", table_idx, hash_value);
+                
+                // Debug: Show what hashes actually exist in this table
+                if hash_table.len() > 0 {
+                    let existing_hashes: Vec<u64> = hash_table.keys().take(3).copied().collect();
+                    println!("🔍 Table {}: existing hashes (sample): {:?}", table_idx, existing_hashes);
                 }
             }
         }
         
+        println!("🔍 LSH search found {} unique candidates", candidates.len());
         Ok(candidates.into_iter().collect())
     }
     

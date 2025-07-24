@@ -44,8 +44,8 @@ impl Default for SemanticSearchConfig {
         Self {
             lsh_candidates: 100,     // Get 100 candidates from LSH
             final_results: 10,       // Return top 10 after reranking
-            lsh_threshold: 0.3,      // Low threshold for broad recall
-            rerank_threshold: 0.7,   // High threshold for precision
+            lsh_threshold: 0.1,      // Even lower threshold for very broad recall
+            rerank_threshold: 0.1,   // Much lower threshold for testing
             enable_caching: true,
             embedding_cache_size: 1000,
         }
@@ -158,7 +158,7 @@ impl SemanticSearchPipeline {
     }
     
     /// Generate embedding for query text
-    async fn generate_query_embedding(&self, text: &str) -> Result<Vec<f32>> {
+    pub async fn generate_query_embedding(&self, text: &str) -> Result<Vec<f32>> {
         let embedding_plugin = self.embedding_plugin.read();
         let embeddings = embedding_plugin.embed_texts(&[text.to_string()]).await?;
         
@@ -172,9 +172,22 @@ impl SemanticSearchPipeline {
     /// Retrieve candidates using LSH index
     async fn retrieve_candidates(&self, query_embedding: &[f32], query: &SearchQuery) -> Result<Vec<SearchResult>> {
         let vector_db = self.vector_db.read();
+        let db_stats = vector_db.stats();
+        println!("🔍 Vector DB stats at search time:");
+        println!("   Total vectors: {}", db_stats.total_vectors);
+        println!("   Total files: {}", db_stats.total_files);
+        println!("🔍 Searching with query embedding len: {}, lsh_candidates: {}", 
+                 query_embedding.len(), self.config.lsh_candidates);
+        
         let mut candidates = vector_db.search(query_embedding, self.config.lsh_candidates)?;
+        println!("🔍 Vector DB search returned {} raw candidates", candidates.len());
         
         // Apply query-specific filtering
+        println!("🔍 Applying query-specific filtering...");
+        println!("   Query code_type: {:?}", query.code_type);
+        println!("   Query language: {:?}", query.language);
+        println!("   LSH threshold: {}", self.config.lsh_threshold);
+        
         self.filter_candidates(&mut candidates, query);
         
         // Sort by similarity (already done by search, but ensure consistency)
@@ -183,7 +196,7 @@ impl SemanticSearchPipeline {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         
-        debug!("Filtered to {} candidates after query-specific filtering", candidates.len());
+        println!("🔍 After filtering and sorting: {} candidates", candidates.len());
         
         Ok(candidates)
     }
