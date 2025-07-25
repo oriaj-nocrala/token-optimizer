@@ -214,9 +214,12 @@ pub fn walk_project_files(root: &Path) -> Result<Vec<String>> {
         .filter_map(|e| e.ok())
     {
         let path = entry.path();
-        if path.is_file() {
+        if path.is_file() && !is_ignored_file(path) {
+            // Support for hybrid projects with multiple languages
             if let Some(extension) = path.extension() {
-                if matches!(extension.to_str(), Some("ts") | Some("js") | Some("scss") | Some("css") | Some("json")) {
+                if matches!(extension.to_str(), 
+                    Some("ts") | Some("js") | Some("scss") | Some("css") | 
+                    Some("json") | Some("rs") | Some("toml")) {
                     files.push(path.to_string_lossy().to_string());
                 }
             }

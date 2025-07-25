@@ -29,6 +29,8 @@ pub struct DetailedAnalysis {
     pub service_info: Option<ServiceInfo>,
     pub pipe_info: Option<PipeInfo>,
     pub module_info: Option<ModuleInfo>,
+    // Rust-specific analysis
+    pub rust_module: Option<RustModuleInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -59,6 +61,17 @@ pub enum Complexity {
     Low,
     Medium,
     High,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ProjectType {
+    Rust,
+    TypeScript,
+    JavaScript,
+    Python,
+    Go,
+    Java,
+    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -79,6 +79,17 @@ pub enum Commands {
         #[command(subcommand)]
         action: MLCommands,
     },
+    
+    /// Start MCP server for Claude Code integration
+    Mcp {
+        /// Port to run the MCP server on
+        #[arg(short, long, default_value = "4080")]
+        port: u16,
+        
+        /// Enable debug logging
+        #[arg(long)]
+        debug: bool,
+    },
 }
 
 #[derive(Subcommand)]

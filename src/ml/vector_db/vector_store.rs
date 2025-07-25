@@ -34,8 +34,8 @@ impl NativeVectorStore {
     pub fn new(config: VectorDBConfig) -> Self {
         let lsh_config = LSHConfig {
             num_hash_functions: config.num_hash_functions,
-            hash_bits: 6,  // Reduced from 10 to 6 for more hash collisions
-            num_tables: 8, // Fixed number of tables
+            hash_bits: 5,  // Further reduced from 6 to 5 for more hash collisions
+            num_tables: 12, // Increased from 8 to 12 for better coverage
             seed: 42,
         };
         

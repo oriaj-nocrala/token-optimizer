@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "token-optimizer": {
+      "command": "curl",
+      "args": [
+        "-X", "POST",
+        "-H", "Content-Type: application/json",
+        "-d", "@-",
+        "http://localhost:4080/tools/{tool}"
+      ],
+      "env": {},
+      "alwaysAllow": [
+        "smart_context",
+        "explore_codebase", 
+        "project_overview",
+        "changes_analysis"
+      ]
+    }
+  }
+}

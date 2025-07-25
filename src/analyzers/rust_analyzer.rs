@@ -116,6 +116,7 @@ impl RustAnalyzer {
             service_info: None,
             pipe_info: None,
             module_info: None,
+            rust_module: Some(rust_module),
         })
     }
     

@@ -133,6 +133,7 @@ impl FileAnalyzer {
             service_info,
             pipe_info,
             module_info: None,
+            rust_module: None,
         }))
     }
 
@@ -398,6 +399,7 @@ impl FileAnalyzer {
                     service_info: None,
                     pipe_info: None,
                     module_info: None,
+                    rust_module: None,
                 };
                 
                 // Convert cargo dependencies to "functions" for display purposes

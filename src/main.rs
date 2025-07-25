@@ -5,6 +5,7 @@ mod cache;
 mod cli;
 mod generators;
 mod ml;
+mod mcp;
 
 use clap::Parser;
 use cli::{Cli, Commands, CacheCommands, MLCommands, ModelCommands};
@@ -98,6 +99,14 @@ async fn main() -> Result<()> {
                     }
                 }
             }
+        }
+        
+        Commands::Mcp { port, debug } => {
+            let mcp_command = MCPCommand {
+                port: *port,
+                debug: *debug,
+            };
+            mcp_command.execute().await?;
         }
     }
 

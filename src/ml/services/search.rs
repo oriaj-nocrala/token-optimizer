@@ -918,11 +918,11 @@ mod tests {
         let service = SemanticSearchService::new(config, plugin_manager);
         
         let embedding = service.create_lexical_embedding("function test() { return 42; }");
-        assert_eq!(embedding.len(), 64);
+        assert_eq!(embedding.len(), 768); // Updated to match Qwen3 embedding dimensions
         
-        // Check normalization
-        let sum: f32 = embedding.iter().sum();
-        assert!((sum - 1.0).abs() < 0.001 || sum == 0.0);
+        // Check L2 normalization (unit vector has magnitude 1.0, not sum 1.0)
+        let magnitude: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((magnitude - 1.0).abs() < 0.001 || magnitude == 0.0);
     }
 
     #[tokio::test]

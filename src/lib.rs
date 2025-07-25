@@ -9,6 +9,7 @@ pub mod analyzers;
 pub mod cache;
 pub mod generators;
 pub mod ml;
+pub mod mcp;
 
 #[cfg(test)]
 pub mod integration_test;

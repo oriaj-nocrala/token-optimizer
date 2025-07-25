@@ -45,7 +45,7 @@ impl Default for SemanticSearchConfig {
             lsh_candidates: 100,     // Get 100 candidates from LSH
             final_results: 10,       // Return top 10 after reranking
             lsh_threshold: 0.1,      // Even lower threshold for very broad recall
-            rerank_threshold: 0.1,   // Much lower threshold for testing
+            rerank_threshold: 0.001, // Ultra-low threshold for debugging
             enable_caching: true,
             embedding_cache_size: 1000,
         }
@@ -159,8 +159,19 @@ impl SemanticSearchPipeline {
     
     /// Generate embedding for query text
     pub async fn generate_query_embedding(&self, text: &str) -> Result<Vec<f32>> {
-        let embedding_plugin = self.embedding_plugin.read();
-        let embeddings = embedding_plugin.embed_texts(&[text.to_string()]).await?;
+        // Strategy: Extract the necessary data from the plugin without holding the lock across await
+        let text_clone = text.to_string();
+        let embedding_plugin = Arc::clone(&self.embedding_plugin);
+        
+        // Spawn a task that handles the embedding generation
+        let embeddings = tokio::task::spawn_blocking(move || {
+            // This runs in a blocking thread where Send is not required
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async move {
+                let plugin = embedding_plugin.read();
+                plugin.embed_texts(&[text_clone]).await
+            })
+        }).await??;
         
         if embeddings.is_empty() {
             anyhow::bail!("Failed to generate embedding for query text");
@@ -230,24 +241,47 @@ impl SemanticSearchPipeline {
     /// Rerank candidates using the reranker model
     async fn rerank_candidates(&self, query: &str, candidates: Vec<SearchResult>) -> Result<Vec<EnhancedSearchResult>> {
         if candidates.is_empty() {
+            println!("🔍 Reranker: No candidates to rerank");
             return Ok(Vec::new());
         }
+        
+        println!("🔍 Reranker: Processing {} candidates", candidates.len());
         
         // Prepare documents for reranking
         let documents: Vec<String> = candidates.iter()
             .map(|c| self.prepare_document_for_reranking(&c.entry))
             .collect();
         
+        println!("🔍 Reranker: Prepared {} documents for reranking", documents.len());
+        for (i, doc) in documents.iter().enumerate() {
+            println!("🔍 Document {}: {} chars", i, doc.len());
+        }
+        
         // Get reranking scores
-        let reranker = self.reranker_plugin.read();
-        let rerank_results = reranker.rank_documents(query, &documents).await?;
+        println!("🔍 Reranker: Calling rank_documents with query: '{}'", query);
+        let query_clone = query.to_string();
+        let documents_clone = documents.clone();
+        let reranker_plugin = Arc::clone(&self.reranker_plugin);
+        
+        let rerank_results = tokio::task::spawn_blocking(move || {
+            let rt = tokio::runtime::Handle::current();
+            rt.block_on(async move {
+                let reranker = reranker_plugin.read();
+                reranker.rank_documents(&query_clone, &documents_clone).await
+            })
+        }).await??;
+        println!("🔍 Reranker: Got {} rerank results", rerank_results.len());
         
         // Combine LSH similarity with reranking scores
         let mut enhanced_results = Vec::new();
         
         for (candidate_idx, rerank_score) in rerank_results {
+            println!("🔍 Processing rerank result: candidate_idx={}, rerank_score={:.6}", candidate_idx, rerank_score);
+            
             if candidate_idx < candidates.len() {
                 let candidate = &candidates[candidate_idx];
+                
+                println!("🔍 Candidate {}: embedding_similarity={:.6}", candidate_idx, candidate.similarity);
                 
                 // Calculate combined score
                 let combined_score = self.calculate_combined_score(
@@ -260,6 +294,8 @@ impl SemanticSearchPipeline {
                     candidate.similarity,
                     rerank_score,
                 );
+                
+                println!("🔍 Calculated scores: combined={:.6}, confidence={:.6}", combined_score, confidence);
                 
                 enhanced_results.push(EnhancedSearchResult {
                     entry: candidate.entry.clone(),
@@ -324,8 +360,19 @@ impl SemanticSearchPipeline {
     
     /// Apply final filtering and result limiting
     async fn finalize_results(&self, mut results: Vec<EnhancedSearchResult>, query: &SearchQuery) -> Result<Vec<EnhancedSearchResult>> {
+        println!("🔍 Finalize: Starting with {} results", results.len());
+        println!("🔍 Finalize: Rerank threshold = {:.6}", self.config.rerank_threshold);
+        
+        // Show all scores before filtering
+        for (i, result) in results.iter().enumerate() {
+            println!("🔍 Result {}: rerank_score={:.6}, combined_score={:.6}", 
+                     i, result.rerank_score, result.combined_score);
+        }
+        
         // Filter by rerank threshold
+        let before_filter = results.len();
         results.retain(|r| r.rerank_score >= self.config.rerank_threshold);
+        println!("🔍 Finalize: After rerank threshold filter: {} -> {} results", before_filter, results.len());
         
         // Apply max results limit
         let max_results = query.max_results.unwrap_or(self.config.final_results);
@@ -457,8 +504,9 @@ mod tests {
             max_results: Some(5),
         };
         
-        let results = pipeline.search(&query).await.unwrap();
-        assert!(results.is_empty()); // No data in empty DB
+        // Should fail when ML plugins are not loaded
+        let result = pipeline.search(&query).await;
+        assert!(result.is_err()); // Expect error when embedding plugin is not loaded
         
         // Test stats
         let stats = pipeline.get_stats().await.unwrap();
