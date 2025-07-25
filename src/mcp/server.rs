@@ -8,17 +8,17 @@ use axum::{
     Router,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::{Arc, Mutex}};
 use tower_http::cors::{Any, CorsLayer};
 use anyhow::Result;
 
 use crate::cache::CacheManager;
 use crate::ml::services::enhanced_search::EnhancedSearchService;
-use super::tools::{SmartContextTool, ExploreCodebaseTool, ProjectOverviewTool, ChangesAnalysisTool, FileSummaryTool, CacheStatusTool, MCPTool};
+use super::tools::{SmartContextTool, ExploreCodebaseTool, ProjectOverviewTool, ChangesAnalysisTool, FileSummaryTool, CacheStatusTool, CacheGenerationTool, CacheGenerationStatusTool, CacheClearTool, MCPTool};
 
 /// MCP Server for Claude Code integration
 pub struct MCPServer {
-    cache_manager: Arc<CacheManager>,
+    cache_manager: Arc<Mutex<CacheManager>>,
     search_service: Arc<EnhancedSearchService>,
     tools: Arc<HashMap<String, Box<dyn MCPTool>>>,
 }
@@ -54,7 +54,7 @@ impl MCPServer {
         
         // Initialize components
         let project_path = std::env::current_dir()?;
-        let cache_manager = Arc::new(CacheManager::new(&project_path)?);
+        let cache_manager = Arc::new(Mutex::new(CacheManager::new(&project_path)?));
         
         // Initialize ML search service with production config
         let ml_config = crate::ml::config::MLConfig {
@@ -125,6 +125,28 @@ impl MCPServer {
             )),
         );
         
+        // Cache Generation Tool - Background cache generation
+        let cache_generation_tool = CacheGenerationTool::new(cache_manager.clone());
+        let generation_state = cache_generation_tool.generation_state.clone();
+        
+        tools.insert(
+            "generate_cache".to_string(),
+            Box::new(cache_generation_tool),
+        );
+        
+        // Cache Generation Status Tool - Monitor cache generation progress
+        tools.insert(
+            "cache_generation_status".to_string(),
+            Box::new(CacheGenerationStatusTool::new(generation_state)),
+        );
+        
+        // Cache Clear Tool - Force cache cleanup for agent control
+        tools.insert(
+            "clear_cache".to_string(),
+            Box::new(CacheClearTool::new(cache_manager.clone())),
+        );
+        
+        
         println!("✅ MCP Server initialized with {} tools", tools.len());
         println!("   - smart_context: Optimized context for Claude Code");
         println!("   - explore_codebase: Semantic file discovery");
@@ -132,6 +154,9 @@ impl MCPServer {
         println!("   - changes_analysis: Git-aware context for modifications");
         println!("   - file_summary: Detailed file analysis with complexity metrics");
         println!("   - cache_status: Cache health and optimization monitoring");
+        println!("   - generate_cache: Background cache generation with progress tracking");
+        println!("   - cache_generation_status: Monitor cache generation progress");
+        println!("   - clear_cache: Force cache cleanup with safety confirmation");
         
         Ok(Self {
             cache_manager,

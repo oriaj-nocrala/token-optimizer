@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
+use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FileMetadata {
@@ -1305,4 +1306,14 @@ mod tests {
             assert_eq!(module_type, deserialized);
         }
     }
+}
+
+/// Result of cache analysis/generation operation  
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalysisResult {
+    pub files_analyzed: usize,
+    pub files_added: usize,
+    pub files_updated: usize,
+    pub files_removed: usize,
+    pub analysis_duration: Duration,
 }

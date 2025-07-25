@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use anyhow::Result;
 
 use crate::cache::CacheManager; 
@@ -13,6 +13,8 @@ use crate::generators::ProjectOverviewGenerator;
 use crate::analyzers::DiffAnalyzer;
 use crate::types::{ChangeType, ModifiedFile};
 use super::context_optimizer::ContextOptimizer;
+use std::time::SystemTime;
+use tokio::sync::RwLock;
 
 /// Result of an MCP tool execution
 #[derive(Debug, Serialize)]
@@ -39,7 +41,7 @@ pub trait MCPTool: Send + Sync {
 
 /// Smart Context Tool - solves compactation pain point
 pub struct SmartContextTool {
-    cache_manager: Arc<CacheManager>,
+    cache_manager: Arc<Mutex<CacheManager>>,
     search_service: Arc<EnhancedSearchService>,
     optimizer: ContextOptimizer,
 }
@@ -55,7 +57,7 @@ struct SmartContextParams {
 
 impl SmartContextTool {
     pub fn new(
-        cache_manager: Arc<CacheManager>,
+        cache_manager: Arc<Mutex<CacheManager>>,
         search_service: Arc<EnhancedSearchService>,
     ) -> Self {
         Self {
@@ -172,7 +174,7 @@ impl MCPTool for SmartContextTool {
 
 /// Explore Codebase Tool - semantic file discovery
 pub struct ExploreCodebaseTool {
-    cache_manager: Arc<CacheManager>,
+    cache_manager: Arc<Mutex<CacheManager>>,
     search_service: Arc<EnhancedSearchService>,
 }
 
@@ -186,7 +188,7 @@ struct ExploreCodebaseParams {
 
 impl ExploreCodebaseTool {
     pub fn new(
-        cache_manager: Arc<CacheManager>,
+        cache_manager: Arc<Mutex<CacheManager>>,
         search_service: Arc<EnhancedSearchService>,
     ) -> Self {
         Self {
@@ -305,7 +307,7 @@ impl MCPTool for ExploreCodebaseTool {
 
 /// Project Overview Tool - Get structured project analysis without reading all files
 pub struct ProjectOverviewTool {
-    cache_manager: Arc<CacheManager>,
+    cache_manager: Arc<Mutex<CacheManager>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -317,7 +319,7 @@ struct ProjectOverviewParams {
 }
 
 impl ProjectOverviewTool {
-    pub fn new(cache_manager: Arc<CacheManager>) -> Self {
+    pub fn new(cache_manager: Arc<Mutex<CacheManager>>) -> Self {
         Self {
             cache_manager,
         }
@@ -441,7 +443,7 @@ impl MCPTool for ProjectOverviewTool {
 
 /// Changes Analysis Tool - Git-aware context for modified files only
 pub struct ChangesAnalysisTool {
-    cache_manager: Arc<CacheManager>,
+    cache_manager: Arc<Mutex<CacheManager>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -453,7 +455,7 @@ struct ChangesAnalysisParams {
 }
 
 impl ChangesAnalysisTool {
-    pub fn new(cache_manager: Arc<CacheManager>) -> Self {
+    pub fn new(cache_manager: Arc<Mutex<CacheManager>>) -> Self {
         Self {
             cache_manager,
         }
@@ -559,7 +561,7 @@ impl MCPTool for ChangesAnalysisTool {
         
         for modified_file in &files_to_analyze {
             // Get file summary from cache if available using proper path normalization
-            if let Some(file_data) = self.cache_manager.get_file_summary(&modified_file.path) {
+            if let Some(file_data) = self.cache_manager.lock().unwrap().get_file_summary(&modified_file.path) {
                 let context = format!(
                     "## {}\n- **Type**: {:?}\n- **Complexity**: {:.1}\n- **Functions**: {}\n- **Last Modified**: {}\n\n**Summary**: {}\n",
                     modified_file.path,
@@ -608,7 +610,7 @@ impl MCPTool for ChangesAnalysisTool {
 
 /// File Summary Tool - Get detailed analysis of a specific file
 pub struct FileSummaryTool {
-    cache_manager: Arc<CacheManager>,
+    cache_manager: Arc<Mutex<CacheManager>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -621,7 +623,7 @@ struct FileSummaryParams {
 }
 
 impl FileSummaryTool {
-    pub fn new(cache_manager: Arc<CacheManager>) -> Self {
+    pub fn new(cache_manager: Arc<Mutex<CacheManager>>) -> Self {
         Self {
             cache_manager,
         }
@@ -679,7 +681,8 @@ impl MCPTool for FileSummaryTool {
         println!("   Format: {}", params.format.as_deref().unwrap_or("markdown"));
         
         // Get file data from cache using proper path normalization
-        let file_data = self.cache_manager.get_file_summary(&params.file_path)
+        let manager = self.cache_manager.lock().unwrap();
+        let file_data = manager.get_file_summary(&params.file_path)
             .ok_or_else(|| anyhow::anyhow!("File not found in cache: {}. Run 'cargo run -- analyze' first.", params.file_path))?;
         
         println!("✅ File found in cache:");
@@ -802,7 +805,7 @@ impl MCPTool for FileSummaryTool {
 
 /// Cache Status Tool - Monitor cache health and optimization opportunities
 pub struct CacheStatusTool {
-    cache_manager: Arc<CacheManager>,
+    cache_manager: Arc<Mutex<CacheManager>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -813,7 +816,7 @@ struct CacheStatusParams {
 }
 
 impl CacheStatusTool {
-    pub fn new(cache_manager: Arc<CacheManager>) -> Self {
+    pub fn new(cache_manager: Arc<Mutex<CacheManager>>) -> Self {
         Self {
             cache_manager,
         }
@@ -862,8 +865,9 @@ impl MCPTool for CacheStatusTool {
         println!("   Include details: {}", params.include_details.unwrap_or(false));
         
         // Get cache statistics
-        let cache_stats = self.cache_manager.get_cache_stats();
-        let cache = self.cache_manager.get_cache();
+        let manager = self.cache_manager.lock().unwrap();
+        let cache_stats = manager.get_cache_stats();
+        let cache = manager.get_cache();
         
         // Calculate detailed metrics
         let total_files = cache.entries.len();
@@ -1023,6 +1027,443 @@ impl MCPTool for CacheStatusTool {
             "include_details": params.include_details.unwrap_or(false),
             "integrity_check": params.check_integrity.unwrap_or(false),
             "analysis_time_ms": 0 // TODO: Add timing
+        });
+        
+        Ok(MCPToolResult {
+            result,
+            metadata: Some(metadata),
+        })
+    }
+}
+
+/// Cache generation progress tracking
+#[derive(Debug, Clone, Serialize)]
+pub struct CacheProgress {
+    pub total_files: usize,
+    pub processed_files: usize,
+    pub current_file: Option<String>,
+    pub errors: Vec<String>,
+    pub percentage: f32,
+}
+
+/// Cache generation status
+#[derive(Debug, Clone, Serialize)]
+pub enum CacheGenerationStatus {
+    Idle,
+    Running,
+    Completed,
+    Failed(String),
+}
+
+/// Shared state for cache generation tracking
+#[derive(Debug, Clone, Serialize)]
+pub struct CacheGenerationState {
+    pub status: CacheGenerationStatus,
+    pub progress: CacheProgress,
+    pub started_at: Option<SystemTime>,
+    pub duration_ms: Option<u64>,
+}
+
+impl Default for CacheGenerationState {
+    fn default() -> Self {
+        Self {
+            status: CacheGenerationStatus::Idle,
+            progress: CacheProgress {
+                total_files: 0,
+                processed_files: 0,
+                current_file: None,
+                errors: Vec::new(),
+                percentage: 0.0,
+            },
+            started_at: None,
+            duration_ms: None,
+        }
+    }
+}
+
+/// Cache Generation Tool - Asynchronous cache generation with progress tracking
+pub struct CacheGenerationTool {
+    cache_manager: Arc<Mutex<CacheManager>>,
+    pub generation_state: Arc<RwLock<CacheGenerationState>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CacheGenerationParams {
+    project_path: Option<String>,
+    force_rebuild: Option<bool>,
+    background: Option<bool>, // Run in background vs foreground
+}
+
+impl CacheGenerationTool {
+    pub fn new(cache_manager: Arc<Mutex<CacheManager>>) -> Self {
+        Self {
+            cache_manager,
+            generation_state: Arc::new(RwLock::new(CacheGenerationState::default())),
+        }
+    }
+}
+
+#[async_trait]
+impl MCPTool for CacheGenerationTool {
+    fn name(&self) -> &str {
+        "generate_cache"
+    }
+    
+    fn description(&self) -> &str {
+        "Generate or rebuild the project cache with real-time progress tracking. Supports background and foreground modes for flexible cache generation."
+    }
+    
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "project_path": {
+                    "type": "string",
+                    "description": "Path to project (defaults to current working directory)"
+                },
+                "force_rebuild": {
+                    "type": "boolean",
+                    "description": "Force complete cache rebuild (default: false)",
+                    "default": false
+                },
+                "background": {
+                    "type": "boolean",
+                    "description": "Run in background mode - returns immediately (default: false)",
+                    "default": false
+                }
+            },
+            "required": []
+        })
+    }
+    
+    async fn execute(&self, parameters: serde_json::Value) -> Result<MCPToolResult> {
+        let params: CacheGenerationParams = serde_json::from_value(parameters)?;
+        
+        let project_path = params.project_path
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+        
+        let force_rebuild = params.force_rebuild.unwrap_or(false);
+        let background = params.background.unwrap_or(false);
+        
+        println!("🏗️ Cache generation request:");
+        println!("   Project: {}", project_path.display());
+        println!("   Force rebuild: {}", force_rebuild);
+        println!("   Background mode: {}", background);
+        
+        if background {
+            // Background mode - start generation and return immediately
+            let _ = Self::run_cache_generation(
+                self.cache_manager.clone(),
+                self.generation_state.clone(),
+                project_path.clone(),
+                force_rebuild
+            ).await;
+            
+            let result = serde_json::json!({
+                "status": "started",
+                "message": "Cache generation started in background",
+                "project_path": project_path.to_string_lossy(),
+                "force_rebuild": force_rebuild,
+                "tip": "Use cache_generation_status tool to monitor progress"
+            });
+            
+            let metadata = serde_json::json!({
+                "background": true,
+                "started_at": SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis()
+            });
+            
+            Ok(MCPToolResult {
+                result,
+                metadata: Some(metadata),
+            })
+        } else {
+            // Foreground mode - wait for completion
+            match Self::run_cache_generation(
+                self.cache_manager.clone(),
+                self.generation_state.clone(),
+                project_path.clone(),
+                force_rebuild
+            ).await {
+                Ok(final_state) => {
+                    let result = serde_json::json!({
+                        "status": "completed",
+                        "final_state": final_state
+                    });
+                    
+                    let metadata = serde_json::json!({
+                        "background": false,
+                        "force_rebuild": force_rebuild,
+                        "project_path": project_path.to_string_lossy()
+                    });
+                    
+                    Ok(MCPToolResult {
+                        result,
+                        metadata: Some(metadata),
+                    })
+                }
+                Err(e) => {
+                    let result = serde_json::json!({
+                        "status": "failed",
+                        "error": e.to_string()
+                    });
+                    
+                    Ok(MCPToolResult {
+                        result,
+                        metadata: None,
+                    })
+                }
+            }
+        }
+    }
+    
+}
+
+impl CacheGenerationTool {
+    /// Run cache generation with progress tracking
+    async fn run_cache_generation(
+        cache_manager: Arc<Mutex<CacheManager>>,
+        generation_state: Arc<RwLock<CacheGenerationState>>,
+        project_path: std::path::PathBuf,
+        force_rebuild: bool,
+    ) -> Result<CacheGenerationState> {
+        // Set initial state
+        {
+            let mut state = generation_state.write().await;
+            state.status = CacheGenerationStatus::Running;
+            state.started_at = Some(SystemTime::now());
+            state.duration_ms = None;
+        }
+        
+        let start_time = SystemTime::now();
+        
+        // Create progress channel
+        let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<crate::cache::CacheProgress>();
+        
+        // Update progress in background
+        let state_clone = generation_state.clone();
+        let progress_task = tokio::spawn(async move {
+            while let Some(cache_progress) = progress_rx.recv().await {
+                let mut state = state_clone.write().await;
+                // Convert cache_manager::CacheProgress to tools::CacheProgress
+                state.progress = CacheProgress {
+                    total_files: cache_progress.total,
+                    processed_files: cache_progress.processed,
+                    current_file: Some(cache_progress.current_file),
+                    errors: Vec::new(), // TODO: Add error handling
+                    percentage: cache_progress.percentage,
+                };
+            }
+        });
+        
+        // Run cache generation
+        let result = CacheManager::analyze_project_async_with_progress(
+            cache_manager,
+            &project_path,
+            force_rebuild,
+            Some(progress_tx),
+        ).await;
+        
+        // Finalize state
+        let duration = start_time.elapsed()?;
+        let mut final_state = generation_state.write().await;
+        
+        match result {
+            Ok(_) => {
+                final_state.status = CacheGenerationStatus::Completed;
+                final_state.duration_ms = Some(duration.as_millis() as u64);
+                final_state.progress.percentage = 100.0;
+                final_state.progress.current_file = None;
+            }
+            Err(e) => {
+                final_state.status = CacheGenerationStatus::Failed(e.to_string());
+                final_state.duration_ms = Some(duration.as_millis() as u64);
+            }
+        }
+        
+        progress_task.abort();
+        
+        println!("🏗️ Cache generation completed in {}ms", duration.as_millis());
+        
+        Ok(final_state.clone())
+    }
+}
+
+/// Cache Generation Status Tool - Monitor cache generation progress
+pub struct CacheGenerationStatusTool {
+    generation_state: Arc<RwLock<CacheGenerationState>>,
+}
+
+impl CacheGenerationStatusTool {
+    pub fn new(generation_state: Arc<RwLock<CacheGenerationState>>) -> Self {
+        Self { generation_state }
+    }
+}
+
+#[async_trait]
+impl MCPTool for CacheGenerationStatusTool {
+    fn name(&self) -> &str {
+        "cache_generation_status"
+    }
+    
+    fn description(&self) -> &str {
+        "Monitor the progress of background cache generation. Shows real-time progress, current file being processed, and any errors encountered."
+    }
+    
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {}
+        })
+    }
+    
+    async fn execute(&self, _parameters: serde_json::Value) -> Result<MCPToolResult> {
+        let state = self.generation_state.read().await.clone();
+        
+        let result = serde_json::json!({
+            "status": state.status,
+            "progress": state.progress,
+            "started_at": state.started_at.map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()),
+            "duration_ms": state.duration_ms,
+            "is_running": matches!(state.status, CacheGenerationStatus::Running)
+        });
+        
+        Ok(MCPToolResult {
+            result,
+            metadata: Some(serde_json::json!({
+                "timestamp": SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()
+            })),
+        })
+    }
+}
+
+/// Cache Clear Tool - Force cache cleanup for agent control
+pub struct CacheClearTool {
+    cache_manager: Arc<Mutex<CacheManager>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CacheClearParams {
+    project_path: Option<String>,
+    confirm: Option<bool>, // Safety confirmation
+    backup_before_clear: Option<bool>, // Create backup before clearing
+}
+
+impl CacheClearTool {
+    pub fn new(cache_manager: Arc<Mutex<CacheManager>>) -> Self {
+        Self { cache_manager }
+    }
+}
+
+#[async_trait]
+impl MCPTool for CacheClearTool {
+    fn name(&self) -> &str {
+        "clear_cache"
+    }
+    
+    fn description(&self) -> &str {
+        "Force cache cleanup and removal. Essential for agent to reset cache state when needed. Provides safety confirmation and optional backup."
+    }
+    
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "project_path": {
+                    "type": "string",
+                    "description": "Path to project (defaults to current working directory)"
+                },
+                "confirm": {
+                    "type": "boolean",
+                    "description": "Safety confirmation to prevent accidental cache deletion (default: false)",
+                    "default": false
+                },
+                "backup_before_clear": {
+                    "type": "boolean",
+                    "description": "Create backup of cache before clearing (default: true)",
+                    "default": true
+                }
+            },
+            "required": []
+        })
+    }
+    
+    async fn execute(&self, parameters: serde_json::Value) -> Result<MCPToolResult> {
+        let params: CacheClearParams = serde_json::from_value(parameters)?;
+        
+        // Safety check - require confirmation
+        if !params.confirm.unwrap_or(false) {
+            return Ok(MCPToolResult {
+                result: serde_json::json!({
+                    "status": "confirmation_required",
+                    "message": "Cache clear operation requires explicit confirmation. Set 'confirm': true to proceed.",
+                    "warning": "This operation will permanently delete all cached analysis data."
+                }),
+                metadata: Some(serde_json::json!({
+                    "safety_check": "enabled",
+                    "confirmed": false
+                })),
+            });
+        }
+        
+        let project_path = params.project_path
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")));
+        
+        println!("🗑️ Clearing cache for project: {}", project_path.display());
+        
+        // Get cache stats before clearing
+        let entries_before = {
+            let manager = self.cache_manager.lock().unwrap();
+            manager.get_cache_stats().total_entries
+        };
+        
+        // Optional backup before clearing
+        let backup_path = if params.backup_before_clear.unwrap_or(true) {
+            let backup_name = format!("cache_backup_{}.json", 
+                SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs());
+            let backup_path = project_path.join(".cache").join(&backup_name);
+            
+            // Create backup - assume cache is at .cache/analysis-cache.json
+            let cache_file_path = project_path.join(".cache").join("analysis-cache.json");
+            if cache_file_path.exists() {
+                // Ensure backup directory exists
+                if let Some(parent) = backup_path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::copy(&cache_file_path, &backup_path)?;
+                println!("💾 Cache backed up to: {}", backup_path.display());
+                Some(backup_path)
+            } else {
+                println!("⚠️ No cache file found to backup");
+                None
+            }
+        } else {
+            None
+        };
+        
+        // Clear the cache using async method
+        let start_time = SystemTime::now();
+        let actual_entries_cleared = CacheManager::clear_cache_async(self.cache_manager.clone()).await?;
+        let clear_duration = start_time.elapsed()?.as_millis();
+        
+        println!("✅ Cache cleared successfully in {}ms", clear_duration);
+        println!("   Removed {} cache entries", entries_before);
+        
+        let result = serde_json::json!({
+            "status": "success",
+            "message": "Cache cleared successfully",
+            "cleared_entries": actual_entries_cleared,
+            "duration_ms": clear_duration,
+            "backup_created": backup_path.is_some(),
+            "backup_path": backup_path.map(|p| p.to_string_lossy().to_string())
+        });
+        
+        let metadata = serde_json::json!({
+            "project_path": project_path.to_string_lossy(),
+            "confirmed": true,
+            "backup_enabled": params.backup_before_clear.unwrap_or(true),
+            "timestamp": SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis()
         });
         
         Ok(MCPToolResult {

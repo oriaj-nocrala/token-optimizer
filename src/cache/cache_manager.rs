@@ -1,8 +1,11 @@
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use chrono::Utc;
+use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc;
+use rayon::prelude::*;
 use crate::types::{CacheEntry, ChangeLogEntry, ChangeType, ImpactLevel};
-use crate::cache::SmartCache;
+use super::smart_cache::SmartCache;
 use crate::analyzers::{FileAnalyzer, CodeSummarizer};
 use crate::utils::{calculate_file_hash, walk_project_files, is_ignored_file};
 
@@ -12,6 +15,25 @@ pub struct CacheManager {
     project_path: PathBuf,
     file_analyzer: FileAnalyzer,
     code_summarizer: CodeSummarizer,
+}
+
+/// Progress update for async cache operations
+#[derive(Debug, Clone)]
+pub struct CacheProgress {
+    pub current_file: String,
+    pub processed: usize,
+    pub total: usize,
+    pub percentage: f32,
+}
+
+/// Result of async cache analysis
+#[derive(Debug)]
+pub struct AsyncAnalysisResult {
+    pub files_processed: usize,
+    pub files_added: usize,
+    pub files_updated: usize,
+    pub errors: Vec<String>,
+    pub duration_ms: u64,
 }
 
 impl CacheManager {
@@ -118,6 +140,23 @@ impl CacheManager {
         self.save_cache()?;
         Ok(())
     }
+    
+    /// ASYNC CACHE CLEARING - Thread-safe cache clearing for MCP tools
+    pub async fn clear_cache_async(cache_manager: Arc<Mutex<Self>>) -> Result<usize> {
+        let entries_before = {
+            let manager = cache_manager.lock().unwrap();
+            manager.cache.entries.len()
+        };
+        
+        // Clear cache in a blocking task to avoid holding the lock during I/O
+        tokio::task::spawn_blocking(move || {
+            let mut manager = cache_manager.lock().unwrap();
+            manager.cache.clear();
+            manager.save_cache()
+        }).await??;
+        
+        Ok(entries_before)
+    }
 
     pub fn get_cache_stats(&self) -> crate::cache::CacheStats {
         self.cache.get_cache_stats()
@@ -215,6 +254,137 @@ impl CacheManager {
         }
         
         None
+    }
+    
+    /// PERFORMANT ASYNC CACHE GENERATION with real-time progress tracking
+    pub async fn analyze_project_async_with_progress(
+        cache_manager: Arc<Mutex<Self>>,
+        project_path: &Path,
+        force_rebuild: bool,
+        progress_tx: Option<mpsc::UnboundedSender<CacheProgress>>,
+    ) -> Result<AsyncAnalysisResult> {
+        let start_time = std::time::Instant::now();
+        let project_path = project_path.to_path_buf();
+        
+        // Get file list async
+        let files = tokio::task::spawn_blocking({
+            let project_path = project_path.clone();
+            move || walk_project_files(&project_path)
+        }).await??;
+        
+        let total_files = files.len();
+        let processed_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let errors = Arc::new(Mutex::new(Vec::new()));
+        
+        println!("🚀 Starting async cache analysis: {} files", total_files);
+        
+        // Process files in parallel batches with Rayon + async hybrid approach
+        let batch_size = 32; // Optimal for I/O + CPU balance
+        let results: Vec<_> = tokio::task::spawn_blocking({
+            let files = files.clone();
+            let cache_manager = cache_manager.clone();
+            let processed_count = processed_count.clone();
+            let errors = errors.clone();
+            let progress_tx = progress_tx.clone();
+            
+            move || {
+                files
+                    .par_chunks(batch_size)
+                    .map(|batch| {
+                        batch.iter().filter_map(|file_path| {
+                            let path = Path::new(file_path);
+                            
+                            if is_ignored_file(path) {
+                                return None;
+                            }
+                            
+                            // Update progress
+                            let current = processed_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                            let percentage = (current as f32 / total_files as f32) * 100.0;
+                            
+                            if let Some(ref tx) = progress_tx {
+                                let _ = tx.send(CacheProgress {
+                                    current_file: file_path.clone(),
+                                    processed: current,
+                                    total: total_files,
+                                    percentage,
+                                });
+                            }
+                            
+                            // Process file
+                            match Self::process_file_sync(&cache_manager, path, force_rebuild) {
+                                Ok(added) => Some((file_path.clone(), added)),
+                                Err(e) => {
+                                    if let Ok(mut errs) = errors.lock() {
+                                        errs.push(format!("{}: {}", file_path, e));
+                                    }
+                                    None
+                                }
+                            }
+                        }).collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<Vec<_>>>()
+                    .into_iter()
+                    .flatten()
+                    .collect()
+            }
+        }).await?;
+        
+        let files_processed = results.len();
+        let files_added = results.iter().filter(|(_, added)| *added).count();
+        let files_updated = files_processed - files_added;
+        let final_errors = errors.lock().unwrap().clone();
+        
+        let duration_ms = start_time.elapsed().as_millis() as u64;
+        
+        println!("✅ Async cache analysis completed:");
+        println!("   Files processed: {}", files_processed);
+        println!("   Files added: {}", files_added);
+        println!("   Files updated: {}", files_updated);
+        println!("   Errors: {}", final_errors.len());
+        println!("   Duration: {}ms", duration_ms);
+        
+        Ok(AsyncAnalysisResult {
+            files_processed,
+            files_added,
+            files_updated,
+            errors: final_errors,
+            duration_ms,
+        })
+    }
+    
+    /// Helper method to process a single file synchronously within async context
+    fn process_file_sync(
+        cache_manager: &Arc<Mutex<Self>>,
+        file_path: &Path,
+        force_reanalysis: bool,
+    ) -> Result<bool> {
+        let mut manager = cache_manager.lock().unwrap();
+        
+        // Check if file needs processing
+        if !force_reanalysis && manager.is_file_up_to_date(file_path)? {
+            return Ok(false); // Not added, already up to date
+        }
+        
+        // Analyze the file
+        manager.analyze_file(file_path)?;
+        Ok(true) // File was added/updated
+    }
+    
+    /// PERFORMANT ASYNC CACHE REBUILD
+    pub async fn rebuild_cache_async_with_progress(
+        cache_manager: Arc<Mutex<Self>>,
+        project_path: &Path,
+        progress_tx: Option<mpsc::UnboundedSender<CacheProgress>>,
+    ) -> Result<AsyncAnalysisResult> {
+        // Clear existing cache first
+        {
+            let mut manager = cache_manager.lock().unwrap();
+            manager.clear_cache()?;
+        }
+        
+        // Rebuild with forced analysis
+        Self::analyze_project_async_with_progress(cache_manager, project_path, true, progress_tx).await
     }
 }
 
@@ -635,6 +805,165 @@ mod tests {
         println!("==============================");
         
         // This test documents the current behavior and will show the path lookup issues
+        
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_async_cache_generation() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        
+        // Create test files
+        create_test_typescript_file(&temp_dir, "test1.ts", "export function test1() { return 42; }")?;
+        create_test_typescript_file(&temp_dir, "test2.ts", "export function test2() { return 'hello'; }")?;
+        create_test_typescript_file(&temp_dir, "subdir/test3.ts", "export function test3() { return true; }")?;
+        
+        // Create cache manager wrapped in Arc<Mutex<>>
+        let cache_manager = Arc::new(Mutex::new(CacheManager::new(temp_dir.path())?));
+        
+        // Test async analysis without progress tracking
+        let result = CacheManager::analyze_project_async_with_progress(
+            cache_manager.clone(),
+            temp_dir.path(),
+            false, // not force rebuild
+            None   // no progress channel
+        ).await?;
+        
+        // Verify results
+        assert!(result.files_processed > 0, "Should have processed some files");
+        assert_eq!(result.errors.len(), 0, "Should have no errors");
+        assert!(result.duration_ms > 0, "Should have taken some time");
+        
+        println!("✅ Async analysis completed: {} files processed in {}ms", 
+                result.files_processed, result.duration_ms);
+        
+        Ok(())
+    }
+    
+    #[tokio::test]
+    async fn test_async_cache_with_progress_tracking() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        
+        // Create more test files to see progress
+        for i in 1..=10 {
+            create_test_typescript_file(&temp_dir, &format!("test{}.ts", i), 
+                &format!("export function test{}() {{ return {}; }}", i, i))?;
+        }
+        
+        let cache_manager = Arc::new(Mutex::new(CacheManager::new(temp_dir.path())?));
+        
+        // Set up progress tracking
+        let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
+        
+        // Spawn task to collect progress updates
+        let progress_updates = Arc::new(Mutex::new(Vec::new()));
+        let progress_updates_clone = progress_updates.clone();
+        
+        let progress_task = tokio::spawn(async move {
+            while let Some(progress) = progress_rx.recv().await {
+                progress_updates_clone.lock().unwrap().push(progress);
+            }
+        });
+        
+        // Run async analysis with progress tracking
+        let result = CacheManager::analyze_project_async_with_progress(
+            cache_manager,
+            temp_dir.path(),
+            false,
+            Some(progress_tx)
+        ).await?;
+        
+        // Give progress task a moment to finish
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        progress_task.abort();
+        
+        // Verify progress updates were received
+        let updates = progress_updates.lock().unwrap();
+        assert!(!updates.is_empty(), "Should have received progress updates");
+        
+        // Check that progress goes from 0 to 100%
+        let first_update = &updates[0];
+        let last_update = &updates[updates.len() - 1];
+        
+        assert!(first_update.percentage < last_update.percentage, 
+               "Progress should increase");
+        assert!(last_update.percentage <= 100.0, 
+               "Progress should not exceed 100%");
+        
+        println!("✅ Progress tracking test: {} updates received, final progress: {:.1}%", 
+                updates.len(), last_update.percentage);
+        println!("   Files processed: {}/{}", result.files_processed, last_update.total);
+        
+        Ok(())
+    }
+    
+    #[tokio::test]
+    async fn test_async_cache_rebuild() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        
+        // Create initial test file
+        create_test_typescript_file(&temp_dir, "initial.ts", "export function initial() { return 1; }")?;
+        
+        let cache_manager = Arc::new(Mutex::new(CacheManager::new(temp_dir.path())?));
+        
+        // First analysis
+        let result1 = CacheManager::analyze_project_async_with_progress(
+            cache_manager.clone(),
+            temp_dir.path(),
+            false,
+            None
+        ).await?;
+        
+        // Add more files
+        create_test_typescript_file(&temp_dir, "added.ts", "export function added() { return 2; }")?;
+        
+        // Test rebuild
+        let result2 = CacheManager::rebuild_cache_async_with_progress(
+            cache_manager,
+            temp_dir.path(),
+            None
+        ).await?;
+        
+        // Rebuild should process more files
+        assert!(result2.files_processed >= result1.files_processed, 
+               "Rebuild should process at least as many files as initial analysis");
+        
+        println!("✅ Cache rebuild test: initial={} files, rebuild={} files", 
+                result1.files_processed, result2.files_processed);
+        
+        Ok(())
+    }
+    
+    #[tokio::test]
+    async fn test_async_error_handling() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        
+        // Create a file with problematic content that might cause parsing issues
+        create_test_typescript_file(&temp_dir, "problematic.ts", "this is not valid typescript {{{ [[[")?;
+        create_test_typescript_file(&temp_dir, "good.ts", "export function good() { return 'ok'; }")?;
+        
+        let cache_manager = Arc::new(Mutex::new(CacheManager::new(temp_dir.path())?));
+        
+        // Should handle errors gracefully
+        let result = CacheManager::analyze_project_async_with_progress(
+            cache_manager,
+            temp_dir.path(),
+            false,
+            None
+        ).await?;
+        
+        // Should still process the good file even if problematic file has issues
+        assert!(result.files_processed > 0, "Should process at least some files");
+        
+        println!("✅ Error handling test: {} files processed, {} errors", 
+                result.files_processed, result.errors.len());
+        
+        if !result.errors.is_empty() {
+            println!("   Errors encountered (expected for malformed files):");
+            for error in &result.errors {
+                println!("     - {}", error);
+            }
+        }
         
         Ok(())
     }
